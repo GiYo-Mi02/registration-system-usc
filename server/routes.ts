@@ -189,9 +189,9 @@ router.post("/api/auth/login", loginLimiter, async (req, res) => {
     }
 
     return res.status(400).json({ success: false, message: "Unsupported console role login request" });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Login route error:", err);
-    return res.status(500).json({ success: false, message: "Internal server error logging in." });
+    return res.status(500).json({ success: false, message: `Internal server error logging in: ${err?.message || String(err)}` });
   }
 });
 
