@@ -1,6 +1,6 @@
 import express from "express";
 import crypto from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import QRCode from "qrcode";
 import { supabase } from "./db";
 import { QR_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD } from "./config";
