@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "/api/handler.cjs"
+      "destination": "/api/index"
     }
   ],
   "headers": [
