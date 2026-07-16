@@ -58,8 +58,12 @@ async function cleanupSessions() {
   }
 }
 
-// Clean sessions periodically every 60 seconds
-setInterval(cleanupSessions, 60000);
+// Clean sessions periodically - only in long-lived processes (not Vercel serverless)
+// On Vercel, PORT is not set; cleanup runs as a one-shot on-demand instead.
+const IS_SERVERLESS = !process.env.PORT;
+if (!IS_SERVERLESS) {
+  setInterval(cleanupSessions, 60000);
+}
 
 // --- SSE ROUTE ---
 router.get("/api/live-updates", async (req, res) => {
@@ -109,6 +113,11 @@ router.post("/api/auth/login", loginLimiter, async (req, res) => {
   }
 
   try {
+    // On serverless (Vercel), run a one-shot session cleanup since setInterval is not available
+    if (IS_SERVERLESS) {
+      cleanupSessions().catch(() => {});
+    }
+
     if (role === "admin") {
       if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
         return res.status(401).json({ success: false, message: "Invalid administrator credentials" });
