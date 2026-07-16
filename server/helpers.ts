@@ -31,6 +31,7 @@ export function escapeHTML(str: string): string {
 // Elegant Dark-Theme Email Template Generator
 export function generateEmailTemplate(
   fullName: string,
+  college: string,
   eventName: string,
   eventDate: string,
   eventVenue: string,
@@ -38,10 +39,11 @@ export function generateEmailTemplate(
   description: string
 ): string {
   const escapedName = escapeHTML(fullName);
+  const escapedCollege = escapeHTML(college);
   const escapedEvent = escapeHTML(eventName);
   const escapedDate = escapeHTML(eventDate);
   const escapedVenue = escapeHTML(eventVenue);
-  const escapedDescription = escapeHTML(description);
+  const escapedDescription = escapeHTML(description).replace(/\r?\n/g, "<br />");
   return `
 <!DOCTYPE html>
 <html>
@@ -59,13 +61,16 @@ export function generateEmailTemplate(
           <tr>
             <td style="background-color:#73C2FB; padding:32px 24px; text-align:center; border-bottom:4px solid #000000; position:relative; overflow:hidden;">
               <!-- Little pixel bird floating -->
-              <img src="https://i.pinimg.com/736x/9d/63/67/9d63676d959ceb7fc33cb1b73cc2780f.jpg" alt="Flappy Bird" width="56" height="48" style="display:block; margin:0 auto 12px auto; image-rendering:-moz-crisp-edges; image-rendering:-o-pixelated; image-rendering:pixelated; border-radius: 4px;" />
+              <img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784209617/FO_BIRD-removebg-preview_kpl3hh.png" alt="Flappy Bird" width="56" height="48" style="display:block; margin:0 auto 12px auto; image-rendering:-moz-crisp-edges; image-rendering:-o-pixelated; image-rendering:pixelated; border-radius: 4px;" />
               <h1 style="margin:0; color:#FFFFFF; font-size:24px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; text-shadow: 3px 3px 0px #000000, -1px -1px 0px #000000, 1px -1px 0px #000000, -1px 1px 0px #000000, 1px 1px 0px #000000;">
                 UNIVERSITY OF MAKATI
               </h1>
               <p style="margin:6px 0 0 0; color:#FFCC00; font-size:11px; font-weight:bold; letter-spacing:2px; text-transform:uppercase; text-shadow: 1.5px 1.5px 0px #000000;">
                 UNIVERSITY STUDENT COUNCIL
               </p>
+              <h2 style="margin:8px 0 0 0; color:#FFFFFF; font-size:14px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; text-shadow: 2px 2px 0px #000000, -1px -1px 0px #000000, 1px -1px 0px #000000, -1px 1px 0px #000000, 1px 1px 0px #000000;">
+                ${escapedEvent}
+              </h2>
             </td>
           </tr>
 
@@ -87,6 +92,10 @@ export function generateEmailTemplate(
 
                 <!-- Match Statistics / Event Details -->
                 <table width="100%" border="0" cellspacing="0" cellpadding="0" style="font-family:'Courier New', Courier, monospace; font-size:12px; color:#543847; font-weight:bold;">
+                  <tr>
+                    <td style="padding:6px 0; width:100px; text-transform:uppercase; color:#543847; opacity:0.8;">COLLEGE:</td>
+                    <td style="padding:6px 0; color:#d35400; font-size:13px; text-transform:uppercase;">${escapedCollege}</td>
+                  </tr>
                   <tr>
                     <td style="padding:6px 0; width:100px; text-transform:uppercase; color:#543847; opacity:0.8;">STAGE:</td>
                     <td style="padding:6px 0; color:#2e7d32; font-size:13px; text-transform:uppercase;">${escapedEvent}</td>

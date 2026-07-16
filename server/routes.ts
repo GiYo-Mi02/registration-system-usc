@@ -542,7 +542,7 @@ router.post("/api/students/manual-add", authenticateToken, requireAdmin, async (
     const eventDesc = eventInfo?.description || "";
 
     const qrDataUrl = await QRCode.toDataURL(signedToken, { margin: 1, scale: 6 });
-    const emailHtml = generateEmailTemplate(full_name, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+    const emailHtml = generateEmailTemplate(full_name, college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
     await supabase.from("email_log").insert({
       student_id: student.id,
@@ -652,7 +652,7 @@ router.post("/api/students/import-csv", authenticateToken, requireAdmin, async (
       });
 
       const qrDataUrl = await QRCode.toDataURL(signedToken, { margin: 1, scale: 6 });
-      const emailHtml = generateEmailTemplate(full_name, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+      const emailHtml = generateEmailTemplate(full_name, college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
       await supabase.from("email_log").insert({
         student_id: student.id,
@@ -721,7 +721,7 @@ router.post("/api/students/:id/resend", authenticateToken, requireAdmin, async (
     const eventDesc = eventInfo?.description || "";
 
     const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
-    const emailHtml = generateEmailTemplate(student.full_name, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+    const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
     // Update Email Log
     await supabase.from("email_log")
