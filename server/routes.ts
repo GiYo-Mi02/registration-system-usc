@@ -551,10 +551,12 @@ router.post("/api/students/manual-add", authenticateToken, requireAdmin, async (
       qr_data_url: qrDataUrl
     });
 
-    sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl).catch(async (e) => {
+    try {
+      await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+    } catch (e: any) {
       await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
       await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
-    });
+    }
 
     notifyClients("student_added", {
       student: {
@@ -597,6 +599,7 @@ router.post("/api/students/import-csv", authenticateToken, requireAdmin, async (
   const eventDesc = eventInfo?.description || "";
 
   let insertedCount = 0;
+  const emailPromises: Promise<any>[] = [];
 
   for (const s of students) {
     const { full_name, email, college } = s;
@@ -658,15 +661,24 @@ router.post("/api/students/import-csv", authenticateToken, requireAdmin, async (
         qr_data_url: qrDataUrl
       });
 
-      sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl).catch(async (e) => {
-        await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
-      });
+      const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
+        .then(async () => {
+          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+        })
+        .catch(async (e) => {
+          await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
+          await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+        });
+      emailPromises.push(emailPromise);
 
       insertedCount++;
     } catch (err) {
       console.error("Failed to import student:", err);
     }
+  }
+
+  if (emailPromises.length > 0) {
+    await Promise.allSettled(emailPromises);
   }
 
   notifyClients("bulk_sync", {});
