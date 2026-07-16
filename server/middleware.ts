@@ -20,13 +20,11 @@ declare global {
 // 1. Rate Limiters
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100, // Increased for development and testing convenience
+  max: 100,
   message: {
     success: false,
     message: "Too many login attempts from this IP. Please try again after 15 minutes."
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  }
 });
 
 export const apiLimiter = rateLimit({
@@ -35,9 +33,7 @@ export const apiLimiter = rateLimit({
   message: {
     success: false,
     message: "Too many requests. Please slow down."
-  },
-  standardHeaders: true,
-  legacyHeaders: false
+  }
 });
 
 // 2. Authentication Middleware
