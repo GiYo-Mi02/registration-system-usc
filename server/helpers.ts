@@ -139,7 +139,7 @@ export function generateEmailTemplate(
                 This QR Code grants a single execution check-in. Any duplicate attempt will cause a registration crash. Do not share.
               </p>
               <div style="margin-top:20px; font-size:9px; opacity:0.6; text-transform:uppercase;">
-                &copy; 2026 APEX INSTITUTION &bull; TICKET VERIFIED ENGINE
+                &copy; 2026 UNIVERSITY OF MAKATI &bull; TICKET VERIFIED ENGINE
               </div>
             </td>
           </tr>
