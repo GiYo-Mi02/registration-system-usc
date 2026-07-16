@@ -64,7 +64,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <Shield className="w-8 h-8" />
           </div>
           <h1 className="font-serif text-3xl font-bold tracking-tight text-brand-text mb-1 uppercase" style={{ fontFamily: "Georgia, serif" }}>
-            Apex Institution
+            University Of Makati
           </h1>
           <p className="text-[10px] text-brand-accent font-semibold tracking-[0.2em] uppercase font-mono">
             SECURE ACCESS PORTAL
