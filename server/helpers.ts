@@ -65,12 +65,12 @@ export function generateEmailTemplate(
               <h1 style="margin:0; color:#FFFFFF; font-size:24px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; text-shadow: 3px 3px 0px #000000, -1px -1px 0px #000000, 1px -1px 0px #000000, -1px 1px 0px #000000, 1px 1px 0px #000000;">
                 UNIVERSITY OF MAKATI
               </h1>
-              <p style="margin:6px 0 0 0; color:#FFCC00; font-size:11px; font-weight:bold; letter-spacing:2px; text-transform:uppercase; text-shadow: 1.5px 1.5px 0px #000000;">
-                UNIVERSITY STUDENT COUNCIL
-              </p>
               <h2 style="margin:8px 0 0 0; color:#FFFFFF; font-size:14px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; text-shadow: 2px 2px 0px #000000, -1px -1px 0px #000000, 1px -1px 0px #000000, -1px 1px 0px #000000, 1px 1px 0px #000000;">
                 ${escapedEvent}
               </h2>
+              <p style="margin:6px 0 0 0; color:#FFCC00; font-size:11px; font-weight:bold; letter-spacing:2px; text-transform:uppercase; text-shadow: 1.5px 1.5px 0px #000000;">
+                UNIVERSITY STUDENT COUNCIL
+              </p>
             </td>
           </tr>
 
@@ -148,7 +148,7 @@ export function generateEmailTemplate(
                 This QR Code grants a single execution check-in. Any duplicate attempt will cause a registration crash. Do not share.
               </p>
               <div style="margin-top:20px; font-size:9px; opacity:0.6; text-transform:uppercase;">
-                &copy; 2026 UNIVERSITY OF MAKATI &bull; TICKET VERIFIED ENGINE
+                &copy; 2026 UNIVERSITY OF MAKATI &bull; Developer Head Gio Joshua Gonzales
               </div>
             </td>
           </tr>
