@@ -5,6 +5,9 @@ import EventsMenu from "./components/EventsMenu";
 import AdminPanel from "./components/AdminPanel";
 import ScannerPanel from "./components/ScannerPanel";
 import { ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
+import { supabase } from "./lib/supabase";
+import { logoutUser, sendHeartbeat } from "./lib/auth";
+import { fetchStudents } from "./lib/api";
 
 export default function App() {
   const [auth, setAuth] = useState<AuthState>({
@@ -21,25 +24,14 @@ export default function App() {
   const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   // Fetch full student list scoped by selected event
-  const fetchStudents = async (tokenOverride?: string, eventIdOverride?: string) => {
+  const loadStudents = async (tokenOverride?: string, eventIdOverride?: string) => {
     const tokenToUse = tokenOverride || auth.token;
     const eventIdToUse = eventIdOverride || selectedEvent?.id;
     if (!tokenToUse || !eventIdToUse) return;
     setLoadingRegistry(true);
     try {
-      const res = await fetch(`/api/students?eventId=${eventIdToUse}&limit=250`, {
-        headers: {
-          "Authorization": `Bearer ${tokenToUse}`
-        }
-      });
-      if (res.status === 401) {
-        handleLogout();
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        setStudents(data.students);
-      }
+      const students = await fetchStudents(tokenToUse, eventIdToUse);
+      setStudents(students);
     } catch (e) {
       console.error("Failed to fetch students:", e);
     } finally {
@@ -58,7 +50,7 @@ export default function App() {
         if (cachedEvent) {
           const parsedEvent = JSON.parse(cachedEvent);
           setSelectedEvent(parsedEvent);
-          fetchStudents(parsedAuth.token, parsedEvent.id);
+          loadStudents(parsedAuth.token, parsedEvent.id);
         }
       } catch (e) {
         sessionStorage.removeItem("securpass_auth");
@@ -67,7 +59,7 @@ export default function App() {
     }
   }, []);
 
-  // 1. Establish SSE Live-Updates connection for real-time reactivity
+  // 1. Establish Supabase Realtime connection for real-time reactivity
   useEffect(() => {
     if (!auth.isAuthenticated || !auth.token) {
       setSseStatus("disconnected");
@@ -75,80 +67,45 @@ export default function App() {
     }
 
     setSseStatus("connecting");
-    const eventSource = new EventSource(`/api/live-updates?token=${encodeURIComponent(auth.token)}`);
 
-    eventSource.onopen = () => {
-      setSseStatus("connected");
-    };
-
-    eventSource.onerror = () => {
-      setSseStatus("disconnected");
-    };
-
-    // Listen to real-time events from server
-    eventSource.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        const { type, data } = payload;
-
-        if (type === "connected") {
-          setActiveSessionCount(data.active_sessions || 0);
-        } else if (type === "session_update") {
-          setActiveSessionCount(data.active_sessions || 0);
-        } else if (type === "student_added") {
-          setStudents((prev) => [data.student, ...prev]);
-        } else if (type === "student_updated") {
-          setStudents((prev) => prev.map((s) => (s.id === data.student.id ? { ...s, ...data.student } : s)));
-        } else if (type === "student_deleted") {
-          setStudents((prev) => prev.filter((s) => s.id !== data.studentId));
-        } else if (type === "bulk_sync") {
-          fetchStudents();
-        } else if (type === "attendance_logged") {
-          // Update local attendance without full refetch for seamless rendering
-          setStudents((prev) =>
-            prev.map((s) =>
-              s.id === data.student_id
-                ? {
-                    ...s,
-                    scanned_at: data.scanned_at,
-                    scanned_by_name: data.scanned_by_name,
-                  }
-                : s
-            )
-          );
-        } else if (type === "db_reset") {
-          fetchStudents();
-        }
-      } catch (e) {
-        console.error("Error parsing real-time message:", e);
-      }
-    };
+    const channel = supabase
+      .channel("realtime-updates")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "students" }, () => {
+        loadStudents();
+        setSseStatus("connected");
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "students" }, (payload) => {
+        setStudents((prev) => prev.filter((s) => s.id !== payload.old.id));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "students" }, () => {
+        loadStudents();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "attendance" }, () => {
+        loadStudents();
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "attendance" }, () => {
+        loadStudents();
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") setSseStatus("connected");
+        if (status === "CLOSED" || status === "CHANNEL_ERROR") setSseStatus("disconnected");
+      });
 
     return () => {
-      eventSource.close();
+      supabase.removeChannel(channel);
     };
   }, [auth.isAuthenticated, auth.token, selectedEvent]);
 
-  // 2. Heartbeat monitoring for active committee and admin sessions
+  // 2. Heartbeat monitoring via Supabase direct update
   useEffect(() => {
     if (!auth.isAuthenticated || !auth.token) return;
 
-    // Send heartbeat every 15 seconds to stay active in system cap
     const heartbeatInterval = setInterval(async () => {
-      try {
-        const res = await fetch("/api/auth/heartbeat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: auth.token }),
-        });
-
-        if (!res.ok) {
-          handleLogout();
-          const roleMsg = auth.role === "admin" ? "administrator" : "scanner";
-          alert(`Your ${roleMsg} session has timed out or been superseded by another operator. Please sign in again.`);
-        }
-      } catch (e) {
-        console.error("Heartbeat error:", e);
+      const alive = await sendHeartbeat(auth.token!);
+      if (!alive) {
+        handleLogout();
+        const roleMsg = auth.role === "admin" ? "administrator" : "scanner";
+        alert(`Your ${roleMsg} session has timed out or been superseded by another operator. Please sign in again.`);
       }
     }, 15000);
 
@@ -163,7 +120,7 @@ export default function App() {
   const handleSelectEvent = (event: Event) => {
     setSelectedEvent(event);
     sessionStorage.setItem("securpass_event", JSON.stringify(event));
-    fetchStudents(auth.token, event.id);
+    loadStudents(auth.token ?? undefined, event.id);
   };
 
   const handleBackToEvents = () => {
@@ -174,13 +131,7 @@ export default function App() {
 
   const handleLogout = async () => {
     if (auth.token) {
-      try {
-        await fetch("/api/auth/logout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: auth.token }),
-        });
-      } catch (e) {}
+      await logoutUser(auth.token);
     }
 
     const clearedAuth: AuthState = {
@@ -288,7 +239,7 @@ export default function App() {
             onBackToEvents={handleBackToEvents}
             onLogout={handleLogout} 
             students={students} 
-            onRefreshStudents={fetchStudents} 
+            onRefreshStudents={loadStudents} 
           />
         ) : auth.role === "committee" ? (
           <ScannerPanel 

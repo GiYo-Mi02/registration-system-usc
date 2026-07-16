@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Shield, Key, Eye, EyeOff, Loader2, UserCheck, Smartphone } from "lucide-react";
 import { AuthState } from "../types";
+import { loginUser } from "../lib/auth";
 
 interface LoginScreenProps {
   onLoginSuccess: (auth: AuthState) => void;
@@ -24,30 +25,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, role }),
-      });
+    const result = await loginUser(username, password, role);
 
-      const data = await response.json();
+    setLoading(false);
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || "Invalid credentials.");
-      }
-
-      onLoginSuccess({
-        isAuthenticated: true,
-        token: data.token,
-        user: data.user,
-        role: data.role,
-      });
-    } catch (err: any) {
-      setError(err.message || "An unexpected error occurred.");
-    } finally {
-      setLoading(false);
+    if (!result.success || !result.auth) {
+      setError(result.message || "Invalid credentials.");
+      return;
     }
+
+    onLoginSuccess(result.auth);
   };
 
   // Removed quick login helper

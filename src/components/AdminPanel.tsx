@@ -25,6 +25,13 @@ import {
   Settings
 } from "lucide-react";
 import { AuthState, Student, Stats, Event } from "../types";
+import { 
+  addStudentManual, 
+  importCsvStudents, 
+  resendTicket, 
+  getEmailPreview, 
+  deleteStudent 
+} from "../lib/api";
 
 interface AdminPanelProps {
   auth: AuthState;
@@ -130,18 +137,15 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     setAddError(null);
 
     try {
-      const res = await fetch("/api/students/manual-add", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${auth.token}`
-        },
-        body: JSON.stringify({ full_name: newName, email: newEmail, college: newCollege, eventId: selectedEvent.id })
+      const res = await addStudentManual(auth.token || "", {
+        full_name: newName,
+        email: newEmail,
+        college: newCollege,
+        eventId: selectedEvent.id
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || "Manual registration failed.");
+      if (!res.success) {
+        throw new Error(res.message || "Manual registration failed.");
       }
 
       // Success
@@ -195,20 +199,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
       setSyncLoading(true);
       try {
-        const res = await fetch("/api/students/import-csv", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${auth.token}`
-          },
-          body: JSON.stringify({ students: parsedStudents, eventId: selectedEvent.id })
-        });
-        const data = await res.json();
-        if (data.success) {
-          alert(`CSV Imported successfully! Registered ${data.insertedCount} new student records.`);
+        const res = await importCsvStudents(auth.token || "", selectedEvent.id, parsedStudents);
+        if (res.success) {
+          alert(`CSV Imported successfully! Registered ${res.insertedCount} new student records.`);
           onRefreshStudents();
         } else {
-          alert(data.message || "Failed to import CSV.");
+          alert(res.message || "Failed to import CSV.");
         }
       } catch (err) {
         alert("Connection error importing CSV.");
@@ -224,16 +220,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const handleResendEmail = async (studentId: string) => {
     setActionLoadingId(studentId);
     try {
-      const res = await fetch(`/api/students/${studentId}/resend`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${auth.token}`
-        },
-        body: JSON.stringify({ simulate_failure: simulateResendFailure })
-      });
-      const data = await res.json();
-      if (data.success) {
+      const res = await resendTicket(auth.token || "", studentId);
+      if (res.success) {
         onRefreshStudents();
       }
     } catch (e) {
@@ -249,14 +237,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     setLoadingEmailPreview(true);
     setEmailPreviewHtml("");
     try {
-      const res = await fetch(`/api/students/${student.id}/email-preview`, {
-        headers: {
-          "Authorization": `Bearer ${auth.token}`
-        }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setEmailPreviewHtml(data.email_html);
+      const res = await getEmailPreview(auth.token || "", student.id);
+      if (res.success && res.html) {
+        setEmailPreviewHtml(res.html);
       } else {
         setEmailPreviewHtml(`<p style="color:red; text-align:center; padding: 40px;">Failed to load ticket email. Standard QR generating. Try clicking "Resend Email" first.</p>`);
       }
@@ -271,13 +254,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const handleDeleteStudent = async (studentId: string) => {
     if (!confirm("Are you sure you want to permanently delete this student registration? This will revoke their QR ticket immediately.")) return;
     try {
-      await fetch(`/api/students/${studentId}/delete`, { 
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${auth.token}`
-        }
-      });
-      onRefreshStudents();
+      const res = await deleteStudent(auth.token || "", studentId);
+      if (res.success) {
+        onRefreshStudents();
+      } else {
+        throw new Error(res.message);
+      }
     } catch (e) {
       alert("Delete failed.");
     }
@@ -301,6 +283,32 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     } catch (e) {
       alert("Reset failed.");
     }
+  };
+
+  // 8. Client-side CSV generator for export
+  const handleExportCSV = () => {
+    let csv = "Email,Name,College,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    for (const student of students) {
+      const isAttended = student.scanned_at ? "Yes" : "No";
+      const scannedTime = student.scanned_at ? new Date(student.scanned_at).toISOString() : "--:--";
+      const scannerName = student.scanned_by_name || "N/A";
+      
+      const escapedName = student.full_name.replace(/"/g, '""');
+      const escapedCollege = student.college.replace(/"/g, '""');
+      const escapedScanner = scannerName.replace(/"/g, '""');
+      
+      csv += `"${student.email}","${escapedName}","${escapedCollege}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+    }
+    
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Event_Attendance_Report_${selectedEvent.name.replace(/\s+/g, "_")}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -573,15 +581,14 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           </div>
 
           {/* Export Report CSV Button */}
-          <a
+          <button
             id="admin-export-csv-btn"
-            href={`/api/export-report?eventId=${selectedEvent.id}&token=${encodeURIComponent(auth.token || "")}`}
-            download
+            onClick={handleExportCSV}
             className="px-5 py-3 bg-brand-accent text-brand-primary-dark hover:bg-brand-accent/90 rounded-xl text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
           >
             <Download className="w-4.5 h-4.5" />
             Export CSV Report
-          </a>
+          </button>
         </div>
 
         {/* Filter Toolbar */}

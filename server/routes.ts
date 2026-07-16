@@ -105,7 +105,7 @@ router.get("/api/live-updates", async (req, res) => {
 });
 
 // --- AUTH ROUTER ---
-router.post("/api/auth/login", loginLimiter, async (req, res) => {
+router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) => {
   const { username, password, role } = req.body;
 
   if (!username || !password || !role) {
@@ -293,8 +293,8 @@ router.post("/api/events", authenticateToken, requireAdmin, async (req, res) => 
   }
 });
 
-router.put("/api/events/:id", authenticateToken, requireAdmin, async (req, res) => {
-  const eventId = req.params.id;
+router.put(["/api/events/:id", "/api/events"], authenticateToken, requireAdmin, async (req, res) => {
+  const eventId = req.params.id || (req.query.id as string);
   const { name, event_date, description, venue, banner_url } = req.body;
   if (!name || !event_date || !description || !venue || !banner_url) {
     return res.status(400).json({ success: false, message: "Please fill in all event details." });
@@ -324,8 +324,8 @@ router.put("/api/events/:id", authenticateToken, requireAdmin, async (req, res) 
   }
 });
 
-router.delete("/api/events/:id", authenticateToken, requireAdmin, async (req, res) => {
-  const eventId = req.params.id;
+router.delete(["/api/events/:id", "/api/events"], authenticateToken, requireAdmin, async (req, res) => {
+  const eventId = req.params.id || (req.query.id as string);
   try {
     const { error } = await supabase
       .from("events")
@@ -432,12 +432,13 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
   }
 });
 
-router.get("/api/students/:id/email-preview", authenticateToken, requireAdmin, async (req, res) => {
+router.get(["/api/students/:id/email-preview", "/api/email-preview"], authenticateToken, requireAdmin, async (req, res) => {
+  const studentId = req.params.id || (req.query.studentId as string);
   try {
     const { data: log, error } = await supabase
       .from("email_log")
       .select("*")
-      .eq("student_id", req.params.id)
+      .eq("student_id", studentId)
       .maybeSingle();
 
     if (error || !log) {
@@ -481,7 +482,7 @@ router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
   }
 });
 
-router.post("/api/students/manual-add", authenticateToken, requireAdmin, async (req, res) => {
+router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, requireAdmin, async (req, res) => {
   const { full_name, email, college, eventId } = req.body;
   if (!full_name || !email || !college || !eventId) {
     return res.status(400).json({ success: false, message: "All fields are required" });
@@ -589,7 +590,7 @@ router.post("/api/students/manual-add", authenticateToken, requireAdmin, async (
   }
 });
 
-router.post("/api/students/import-csv", authenticateToken, requireAdmin, async (req, res) => {
+router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, requireAdmin, async (req, res) => {
   const { students, eventId } = req.body;
   if (!Array.isArray(students) || !eventId) {
     return res.status(400).json({ success: false, message: "Invalid payload: students array and eventId required" });
@@ -694,8 +695,8 @@ router.post("/api/students/import-csv", authenticateToken, requireAdmin, async (
   return res.json({ success: true, insertedCount });
 });
 
-router.post("/api/students/:id/resend", authenticateToken, requireAdmin, async (req, res) => {
-  const studentId = req.params.id;
+router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requireAdmin, async (req, res) => {
+  const studentId = req.params.id || (req.query.studentId as string) || req.body.studentId;
 
   try {
     const { data: student, error: stdError } = await supabase

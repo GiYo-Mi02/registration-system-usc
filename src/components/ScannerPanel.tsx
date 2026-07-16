@@ -12,9 +12,8 @@ import {
   Terminal
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
-import { AuthState } from "../types";
-
-import { Event } from "../types";
+import { AuthState, Event } from "../types";
+import { verifyScan } from "../lib/api";
 
 interface ScannerPanelProps {
   auth: AuthState;
@@ -123,22 +122,11 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     setScannerStatus("idle");
   };
 
-  // Central Cryptographic verification router
+  // Central Cryptographic verification router — calls Supabase RPC directly
   const handleVerifyToken = async (tokenStr: string) => {
     try {
-      const res = await fetch("/api/verify-scan", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${auth.token}`
-        },
-        body: JSON.stringify({
-          token: tokenStr,
-          eventId: selectedEvent.id
-        })
-      });
-
-      const data = await res.json();
+      const scannedBy = auth.user?.id || "unknown";
+      const data = await verifyScan(tokenStr, scannedBy, selectedEvent.id);
 
       if (data.status === "VALID") {
         setScanState("valid");

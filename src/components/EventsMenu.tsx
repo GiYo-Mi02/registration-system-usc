@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Edit3, Trash2, Calendar, MapPin, LogOut, Loader2, Sparkles } from "lucide-react";
 import { Event, AuthState } from "../types";
+import { fetchEvents as fetchEventsFromApi, updateEvent, createEvent, deleteEvent } from "../lib/api";
 
 interface EventsMenuProps {
   auth: AuthState;
@@ -26,25 +27,17 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetchEvents();
-  }, []);
+    if (auth.token) {
+      fetchEvents();
+    }
+  }, [auth.token]);
 
   const fetchEvents = async () => {
+    if (!auth.token) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/events", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
-      if (res.status === 401) {
-        onLogout();
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        setEvents(data.events);
-      } else {
-        throw new Error(data.message || "Failed to load events.");
-      }
+      const data = await fetchEventsFromApi(auth.token);
+      setEvents(data);
     } catch (err: any) {
       setError(err.message || "Network error loading events.");
     } finally {
@@ -83,23 +76,13 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
     const body = { name, event_date: eventDate, venue, description, banner_url: bannerUrl };
 
     try {
-      const url = editingEvent ? `/api/events/${editingEvent.id}` : "/api/events";
-      const method = editingEvent ? "PUT" : "POST";
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${auth.token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || "Failed to save event.");
+      if (editingEvent) {
+        const result = await updateEvent(auth.token || "", editingEvent.id, body);
+        if (!result.success) throw new Error(result.message || "Failed to save event.");
+      } else {
+        const result = await createEvent(auth.token || "", body);
+        if (!result.success) throw new Error(result.message || "Failed to create event.");
       }
-
       setIsModalOpen(false);
       fetchEvents();
     } catch (err: any) {
@@ -116,16 +99,9 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`/api/events/${event.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
-      const data = await res.json();
-      if (data.success) {
-        fetchEvents();
-      } else {
-        throw new Error(data.message || "Failed to delete event.");
-      }
+      const result = await deleteEvent(auth.token || "", event.id);
+      if (!result.success) throw new Error(result.message || "Failed to delete event.");
+      fetchEvents();
     } catch (err: any) {
       alert(err.message || "An error occurred.");
     }
