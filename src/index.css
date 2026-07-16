@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Marcellus&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Marcellus", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-sans: "Metropolis", "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  
+  --color-brand-primary: #1A3C2E;   /* Deep Forest Green */
+  --color-brand-primary-light: #142E23; /* Medium Forest Green for containers */
+  --color-brand-primary-dark: #0F261D;  /* Dark Obsidian Forest background */
+  --color-brand-accent: #FFCC00;    /* Vivid Amber Gold */
+  --color-brand-text: #FAF7EA;      /* Elegant Cream */
+}
+
+/* Base custom styles to reinforce high visual quality, scrollbars and body styles */
+html, body {
+  background-color: var(--color-brand-primary-dark);
+  color: var(--color-brand-text);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+/* Custom scrollbars matching the brand theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-brand-primary-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-brand-primary);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-brand-accent);
+}
+
+.font-heading {
+  font-family: var(--font-serif);
+}
+

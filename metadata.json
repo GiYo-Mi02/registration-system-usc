@@ -1,0 +1,8 @@
+{
+  "name": "Student Registration & QR Attendance System",
+  "description": "A two-role student event registration & secure QR code attendance system. Admin dashboard manages imports, sends single-use secure QRs, and tracks real-time status. Committee scanner validates QRs at the door and records attendance with a 10-session cap.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
