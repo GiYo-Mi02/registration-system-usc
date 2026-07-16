@@ -139,14 +139,14 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
         setScanResult({ message: data.message || "Fake or forged QR signature detected." });
       }
 
-      // Start 3-second auto-clear timer
+      // Start 30-second auto-clear timer
       if (cooldownTimerRef.current) {
         clearTimeout(cooldownTimerRef.current);
       }
       cooldownTimerRef.current = setTimeout(() => {
         setScanState("idle");
         setScanResult(null);
-      }, 3000);
+      }, 30000);
     } catch (e: any) {
       setScanState("fake");
       setScanResult({ message: "Network connection or signature validation failed." });

@@ -120,7 +120,7 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
             </div>
             <div>
               <h1 className="font-serif text-xl md:text-2xl font-bold tracking-tight uppercase" style={{ fontFamily: "Georgia, serif" }}>
-                Apex Events
+                University of Makati Student Council
               </h1>
               <p className="text-[9px] text-brand-accent font-mono tracking-widest uppercase">
                 {isAdmin ? "ADMINISTRATIVE CONTROL PANEL" : "GATE CHECK-IN SELECTOR"}
