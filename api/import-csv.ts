@@ -90,7 +90,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             email: trimmedEmail,
             college,
             form_response_id: formResponseId,
-            email_status: "sent"
+            email_status: "failed",
+            email_error: "queued"
           })
           .select("id")
           .single();
@@ -120,7 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         await supabase.from("email_log").insert({
           student_id: student.id,
-          status: "sent",
+          status: "failed",
+          error_message: "queued",
           email_html: emailHtml,
           qr_data_url: qrDataUrl
         });
@@ -131,6 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
           .then(async () => {
             await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+            await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
           })
           .catch(async (e) => {
             await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);

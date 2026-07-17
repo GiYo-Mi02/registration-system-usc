@@ -57,11 +57,68 @@ export function generateEmailTemplate(
       <td align="center">
         <table width="480" border="0" cellspacing="0" cellpadding="0" style="background-color:#5c9e2b; border: 4px solid #000000; border-radius: 12px; overflow:hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.3);">
           
+          <!-- Partner / Sponsor Logos Header -->
+          <tr>
+            <td style="background-color:#ffffff; padding:12px 10px; text-align:center; border-bottom:4px solid #000000;">
+              <table border="0" cellspacing="0" cellpadding="0" align="center" style="margin: 0 auto; background-color: #ffffff;">
+                <tr>
+                  <td style="padding: 0 8px;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784298519/UMak_Logo_-_White_R_egxa4f.png" height="32" style="display:block; max-height:32px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));" alt="UMak" /></td>
+                  <td style="padding: 0 8px; border-left: 2px solid #e0e0e0;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784298535/USC-Logo_nksfl8.png" height="32" style="display:block; max-height:32px;" alt="USC" /></td>
+                  <td style="padding: 0 8px; border-left: 2px solid #e0e0e0;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784209617/FO_BIRD-removebg-preview_kpl3hh.png" height="32" style="display:block; max-height:32px;" alt="Herons" /></td>
+                  <td style="padding: 0 8px; border-left: 2px solid #e0e0e0;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784298531/Tuseran_Forte_CAP_2026_z67nhz.png" height="32" style="display:block; max-height:32px;" alt="Tuseran Forte" /></td>
+                  <td style="padding: 0 8px; border-left: 2px solid #e0e0e0;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784298534/SPONSOR_LOGO_kxton7.jpg" height="32" style="display:block; max-height:32px; border-radius: 2px;" alt="Sponsor 1" /></td>
+                  <td style="padding: 0 8px; border-left: 2px solid #e0e0e0;"><img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784298533/SPONSOR_LOGO_1_iy8h5g.jpg" height="32" style="display:block; max-height:32px; border-radius: 2px;" alt="Sponsor 2" /></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
           <!-- Sky Blue Header -->
           <tr>
-            <td style="background-color:#73C2FB; padding:32px 24px; text-align:center; border-bottom:4px solid #000000; position:relative; overflow:hidden;">
-              <!-- Little pixel bird floating -->
-              <img src="https://res.cloudinary.com/dcgejrmm0/image/upload/v1784209617/FO_BIRD-removebg-preview_kpl3hh.png" alt="Flappy Bird" width="56" height="48" style="display:block; margin:0 auto 12px auto; image-rendering:-moz-crisp-edges; image-rendering:-o-pixelated; image-rendering:pixelated; border-radius: 4px;" />
+            <td style="background-color:#73C2FB; padding:28px 24px; text-align:center; border-bottom:4px solid #000000; position:relative; overflow:hidden;">
+              
+              <!-- Floating Soft White Pixelated Clouds -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 24px; margin-top: -10px;">
+                <tr>
+                  <td align="left" style="width: 33%; padding-left: 10px;">
+                    <!-- Pixelated Cloud left -->
+                    <table border="0" cellspacing="0" cellpadding="0" align="left" style="line-height: 0; font-size: 0; opacity: 0.85;">
+                      <tr>
+                        <td>
+                          <div style="width: 30px; height: 6px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 60px; height: 10px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 46px; height: 6px; background-color: #ffffff; margin: 0 auto;"></div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td align="center" style="width: 34%;">
+                    <!-- Pixelated Cloud center -->
+                    <table border="0" cellspacing="0" cellpadding="0" align="center" style="line-height: 0; font-size: 0; opacity: 0.85; margin: 0 auto;">
+                      <tr>
+                        <td>
+                          <div style="width: 50px; height: 8px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 100px; height: 12px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 80px; height: 8px; background-color: #ffffff; margin: 0 auto;"></div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td align="right" style="width: 33%; padding-right: 10px;">
+                    <!-- Pixelated Cloud right -->
+                    <table border="0" cellspacing="0" cellpadding="0" align="right" style="line-height: 0; font-size: 0; opacity: 0.85;">
+                      <tr>
+                        <td>
+                          <div style="width: 20px; height: 5px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 44px; height: 8px; background-color: #ffffff; margin: 0 auto;"></div>
+                          <div style="width: 32px; height: 5px; background-color: #ffffff; margin: 0 auto;"></div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
               <h1 style="margin:0; color:#FFFFFF; font-size:24px; font-weight:bold; letter-spacing:1px; text-transform:uppercase; text-shadow: 3px 3px 0px #000000, -1px -1px 0px #000000, 1px -1px 0px #000000, -1px 1px 0px #000000, 1px 1px 0px #000000;">
                 UNIVERSITY OF MAKATI
               </h1>
@@ -85,9 +142,9 @@ export function generateEmailTemplate(
                   PLAYER: <span style="color:#d35400;">${escapedName}</span>
                 </h2>
 
-                <!-- Retro Green Pipe Decorator -->
-                <div style="height:14px; background-color:#73c732; border:3px solid #000000; border-radius:4px; margin:16px 0; position:relative;">
-                  <div style="position:absolute; top:2px; left:6px; width:4px; height:4px; background-color:#ffffff; opacity:0.6;"></div>
+                <!-- Retro Green Pipe Decorator with 3D shadow wraps -->
+                <div style="height:16px; background-color:#73c732; border:3px solid #000000; border-radius:4px; margin:16px 0; position:relative; box-shadow: inset -6px 0px 0px #529c1f, inset 6px 0px 0px #a3f25c;">
+                  <div style="position:absolute; top:2px; left:12px; width:4px; height:6px; background-color:#ffffff; opacity:0.6;"></div>
                 </div>
 
                 <!-- Match Statistics / Event Details -->
@@ -141,6 +198,21 @@ export function generateEmailTemplate(
           <!-- Flappy Ground Footer Decorator -->
           <tr>
             <td style="background-color:#ded895; border-top:8px solid #73c732; padding:28px 24px; text-align:center; font-family:'Courier New', Courier, monospace; color:#543847; font-size:11px; font-weight:bold;">
+              
+              <!-- Upward Pipe emerging from ground -->
+              <table border="0" cellspacing="0" cellpadding="0" align="center" style="margin: -38px auto 16px auto;">
+                <tr>
+                  <td align="center">
+                    <div style="width: 48px; height: 14px; background-color: #73c732; border: 3px solid #000000; border-radius: 3px; box-shadow: inset -4px 0px 0px #529c1f, inset 4px 0px 0px #a3f25c; position: relative;">
+                      <div style="position: absolute; left: 6px; top: 1px; width: 3px; height: 6px; background-color: #ffffff; opacity: 0.6;"></div>
+                    </div>
+                    <div style="width: 38px; height: 16px; background-color: #73c732; border-left: 3px solid #000000; border-right: 3px solid #000000; box-shadow: inset -4px 0px 0px #529c1f, inset 4px 0px 0px #a3f25c; position: relative; margin-top: -1px;">
+                      <div style="position: absolute; left: 6px; top: 0; width: 3px; height: 16px; background-color: #ffffff; opacity: 0.6;"></div>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+
               <p style="margin:0 0 8px 0; text-transform:uppercase; font-size:12px; color:#c0392b;">
                 ⚡ ONE LIFE PASS ⚡
               </p>

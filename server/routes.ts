@@ -104,6 +104,38 @@ router.get("/api/live-updates", async (req, res) => {
   }
 });
 
+// --- HEARTBEAT ROUTER ---
+router.post(["/api/auth/heartbeat", "/api/heartbeat"], authenticateToken, async (req, res) => {
+  const token = req.headers.authorization?.substring(7);
+  if (!token) {
+    return res.status(401).json({ success: false, message: "Authorization token required." });
+  }
+
+  try {
+    const { data: session } = await supabase
+      .from("committee_sessions")
+      .select("id")
+      .eq("session_token", token)
+      .maybeSingle();
+
+    if (!session) {
+      return res.status(401).json({ success: false, message: "Session expired or invalid." });
+    }
+
+    const { error } = await supabase
+      .from("committee_sessions")
+      .update({ last_heartbeat: new Date().toISOString() })
+      .eq("session_token", token);
+
+    if (error) throw error;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Heartbeat local route error:", err);
+    return res.status(500).json({ success: false, message: "Failed to update heartbeat." });
+  }
+});
+
 // --- AUTH ROUTER ---
 router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) => {
   const { username, password, role } = req.body;
@@ -366,7 +398,8 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
     let query = supabase
       .from("students")
       .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message)", { count: "exact" })
-      .eq("event_id", eventId);
+      .eq("event_id", eventId)
+      .order("imported_at", { ascending: false });
 
     if (search) {
       query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
@@ -414,18 +447,29 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
       students = students.filter(s => s.email_status === emailStatusFilter);
     }
 
-    // Paginate in memory
-    const filteredCount = students.length;
-    const startIndex = (page - 1) * limit;
-    const paginatedStudents = students.slice(startIndex, startIndex + limit);
+    // Paginate in memory ONLY if page/limit parameters were explicitly provided
+    const hasPagination = req.query.page || req.query.limit;
+    if (hasPagination) {
+      const filteredCount = students.length;
+      const startIndex = (page - 1) * limit;
+      const paginatedStudents = students.slice(startIndex, startIndex + limit);
 
-    return res.json({
-      success: true,
-      students: paginatedStudents,
-      totalCount: filteredCount,
-      totalPages: Math.ceil(filteredCount / limit),
-      currentPage: page
-    });
+      return res.json({
+        success: true,
+        students: paginatedStudents,
+        totalCount: filteredCount,
+        totalPages: Math.ceil(filteredCount / limit),
+        currentPage: page
+      });
+    } else {
+      return res.json({
+        success: true,
+        students,
+        totalCount: students.length,
+        totalPages: 1,
+        currentPage: 1
+      });
+    }
   } catch (err) {
     console.error("Fetch students error:", err);
     return res.status(500).json({ success: false, message: "Database query failed." });
@@ -511,7 +555,8 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
         email: trimmedEmail,
         college,
         form_response_id: formResponseId,
-        email_status: "sent"
+        email_status: "failed",
+        email_error: "queued"
       })
       .select("*")
       .single();
@@ -556,33 +601,40 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
 
     await supabase.from("email_log").insert({
       student_id: student.id,
-      status: "sent",
+      status: "failed",
+      error_message: "queued",
       email_html: emailHtml,
       qr_data_url: qrDataUrl
     });
 
     try {
       await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+      await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+      await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
     } catch (e: any) {
       await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
       await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
     }
 
+    const { data: updatedStudent } = await supabase
+      .from("students")
+      .select("*")
+      .eq("id", student.id)
+      .single();
+
+    const studentToReturn = {
+      ...(updatedStudent || student),
+      scanned_at: null,
+      scanned_by_name: undefined
+    };
+
     notifyClients("student_added", {
-      student: {
-        ...student,
-        scanned_at: null,
-        scanned_by_name: undefined
-      }
+      student: studentToReturn
     });
 
     return res.json({
       success: true,
-      student: {
-        ...student,
-        scanned_at: null,
-        scanned_by_name: undefined
-      }
+      student: studentToReturn
     });
   } catch (err) {
     console.error("Manual add error:", err);
@@ -636,7 +688,8 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
           email: trimmedEmail,
           college,
           form_response_id: formResponseId,
-          email_status: "sent"
+          email_status: "failed",
+          email_error: "queued"
         })
         .select("id")
         .single();
@@ -666,7 +719,8 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 
       await supabase.from("email_log").insert({
         student_id: student.id,
-        status: "sent",
+        status: "failed",
+        error_message: "queued",
         email_html: emailHtml,
         qr_data_url: qrDataUrl
       });
@@ -674,6 +728,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
       const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
         .then(async () => {
           await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
         })
         .catch(async (e) => {
           await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
@@ -780,10 +835,66 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
   }
 });
 
+router.delete("/api/students", authenticateToken, requireAdmin, async (req, res) => {
+  const eventId = req.query.eventId as string;
+  const all = req.query.all === "true";
+
+  try {
+    if (all) {
+      if (!eventId) {
+        return res.status(400).json({ success: false, message: "eventId parameter is required." });
+      }
+
+      // Fetch all student IDs for this event
+      const { data: studentRecords, error: fetchErr } = await supabase
+        .from("students")
+        .select("id")
+        .eq("event_id", eventId);
+
+      if (fetchErr) throw fetchErr;
+
+      const studentIds = (studentRecords || []).map(s => s.id);
+
+      if (studentIds.length > 0) {
+        await supabase.from("email_log").delete().in("student_id", studentIds);
+        await supabase.from("attendance").delete().in("student_id", studentIds);
+        await supabase.from("qr_tokens").delete().in("student_id", studentIds);
+        const { error: delErr } = await supabase.from("students").delete().in("id", studentIds);
+        if (delErr) throw delErr;
+      }
+
+      notifyClients("bulk_delete", { eventId });
+      return res.json({ success: true, count: studentIds.length });
+    } else {
+      const studentId = req.query.studentId as string;
+      if (!studentId) {
+        return res.status(400).json({ success: false, message: "studentId parameter is required." });
+      }
+
+      // Delete in cascade order: email_log → attendance → qr_tokens → student
+      await supabase.from("email_log").delete().eq("student_id", studentId);
+      await supabase.from("attendance").delete().eq("student_id", studentId);
+      await supabase.from("qr_tokens").delete().eq("student_id", studentId);
+      const { error } = await supabase.from("students").delete().eq("id", studentId);
+      if (error) throw error;
+
+      notifyClients("student_deleted", { studentId });
+      return res.json({ success: true });
+    }
+  } catch (err: any) {
+    console.error("Delete student error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Failed to delete student registrant." });
+  }
+});
+
 router.post("/api/students/:id/delete", authenticateToken, requireAdmin, async (req, res) => {
   const studentId = req.params.id;
 
   try {
+    // Delete in cascade order: email_log → attendance → qr_tokens → student
+    await supabase.from("email_log").delete().eq("student_id", studentId);
+    await supabase.from("attendance").delete().eq("student_id", studentId);
+    await supabase.from("qr_tokens").delete().eq("student_id", studentId);
     const { error } = await supabase.from("students").delete().eq("id", studentId);
     if (error) throw error;
 

@@ -25,10 +25,18 @@ We have successfully migrated the architecture from a combined Express/Vercel se
 
 ### 3. Local Development Compatibility
 *   [**`server/routes.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/server/routes.ts): Registered route mapping aliases for `/api/login`, `/api/events`, `/api/students`, `/api/manual-add`, `/api/import-csv`, `/api/resend`, `/api/email-preview` so that your local dev environment behaves identically to production Vercel.
+- **Added `DELETE /api/students` endpoint** in [`server/routes.ts`](file:///c:/Users/gio%2520joshua%2520gonzales/OneDrive/Desktop/regisystem/server/routes.ts): Standardizes local Express server parity with the production Vercel handler.
+- **Enabled Cascade Deletion**: Updated both the `DELETE` and `POST` deletion endpoints to delete records from child tables (`email_log`, `attendance`, and `qr_tokens`) in cascade order before removing the student record, resolving foreign key constraint failures.
 
-### 4. Build Configuration
-*   [**`vercel.json`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/vercel.json): Removed the Express rewrite proxy, falling back to Vercel's native routing.
-*   [**`package.json`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/package.json): Installed devDependencies type declarations for `@vercel/node`.
+---
+
+## 4. Bulk Delete Feature ("Clear Registry")
+
+- **Backend updates**: Added support for the `all=true` query parameter inside the `DELETE /api/students` endpoint in both `api/students.ts` (production) and `server/routes.ts` (local). When activated, the server fetches all students registered for the given `eventId`, deletes their related records in cascade order (`email_log` → `attendance` → `qr_tokens`), and removes all student entries in one operation.
+- **Client utility**: Added `deleteAllStudents` helper in [`src/lib/api.ts`](file:///c:/Users/gio%2520joshua%2520gonzales/OneDrive/Desktop/regisystem/src/lib/api.ts).
+- **Admin UI changes**:
+  - Implemented soft, borderless, floating pixelated (stair-step blocky) white clouds inside the Sky Blue header background to give a clean retro pixel "sky" feel. Removed the green pipes and bird mascot from the header area.tsx`](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/components/AdminPanel.tsx).
+  - Added double safety confirmations: (1) a confirmation dialog, and (2) a text validation prompt where the user must type the exact name of the event to execute the bulk deletion.
 
 ---
 

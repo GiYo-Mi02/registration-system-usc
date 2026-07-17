@@ -95,20 +95,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ─── DELETE: REMOVE STUDENT RECORD ──────────────────────────────────────
     if (req.method === "DELETE") {
-      const studentId = req.query.studentId as string;
-      if (!studentId) {
-        return res.status(400).json({ success: false, message: "studentId parameter is required." });
+      const eventId = req.query.eventId as string;
+      const all = req.query.all === "true";
+
+      if (all) {
+        if (!eventId) {
+          return res.status(400).json({ success: false, message: "eventId parameter is required." });
+        }
+
+        // Fetch all student IDs for this event
+        const { data: studentRecords, error: fetchErr } = await supabase
+          .from("students")
+          .select("id")
+          .eq("event_id", eventId);
+
+        if (fetchErr) throw fetchErr;
+
+        const studentIds = (studentRecords || []).map(s => s.id);
+
+        if (studentIds.length > 0) {
+          await supabase.from("email_log").delete().in("student_id", studentIds);
+          await supabase.from("attendance").delete().in("student_id", studentIds);
+          await supabase.from("qr_tokens").delete().in("student_id", studentIds);
+          const { error: delErr } = await supabase.from("students").delete().in("id", studentIds);
+          if (delErr) throw delErr;
+        }
+
+        return res.status(200).json({ success: true, count: studentIds.length });
+      } else {
+        const studentId = req.query.studentId as string;
+        if (!studentId) {
+          return res.status(400).json({ success: false, message: "studentId parameter is required." });
+        }
+
+        // Delete in cascade order: email_log → attendance → qr_tokens → student
+        await supabase.from("email_log").delete().eq("student_id", studentId);
+        await supabase.from("attendance").delete().eq("student_id", studentId);
+        await supabase.from("qr_tokens").delete().eq("student_id", studentId);
+        const { error: delErr } = await supabase.from("students").delete().eq("id", studentId);
+
+        if (delErr) throw delErr;
+
+        return res.status(200).json({ success: true });
       }
-
-      // Delete in cascade order: email_log → attendance → qr_tokens → student
-      await supabase.from("email_log").delete().eq("student_id", studentId);
-      await supabase.from("attendance").delete().eq("student_id", studentId);
-      await supabase.from("qr_tokens").delete().eq("student_id", studentId);
-      const { error: delErr } = await supabase.from("students").delete().eq("id", studentId);
-
-      if (delErr) throw delErr;
-
-      return res.status(200).json({ success: true });
     }
 
     return res.status(405).json({ success: false, message: "Method not allowed" });

@@ -75,7 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         email: trimmedEmail,
         college,
         form_response_id: formResponseId,
-        email_status: "sent"
+        email_status: "failed",
+        email_error: "queued"
       })
       .select("*")
       .single();
@@ -120,22 +121,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     await supabase.from("email_log").insert({
       student_id: student.id,
-      status: "sent",
+      status: "failed",
+      error_message: "queued",
       email_html: emailHtml,
       qr_data_url: qrDataUrl
     });
 
     try {
       await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+      await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+      await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
     } catch (e: any) {
       await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
       await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
     }
 
+    const { data: updatedStudent } = await supabase
+      .from("students")
+      .select("*")
+      .eq("id", student.id)
+      .single();
+
     return res.status(200).json({
       success: true,
       student: {
-        ...student,
+        ...(updatedStudent || student),
         scanned_at: null,
         scanned_by_name: undefined
       }

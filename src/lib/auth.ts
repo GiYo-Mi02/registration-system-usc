@@ -55,17 +55,15 @@ export async function logoutUser(token: string): Promise<void> {
 // Returns false if session no longer exists (expired or revoked).
 export async function sendHeartbeat(token: string): Promise<boolean> {
   try {
-    const now = new Date().toISOString();
-    const { error } = await supabase
-      .from("committee_sessions")
-      .update({ last_heartbeat: now })
-      .eq("session_token", token);
-
-    if (error) {
-      console.error("[Auth] Heartbeat error:", error);
-      return false;
-    }
-    return true;
+    const res = await fetch("/api/heartbeat", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.success;
   } catch (e) {
     console.error("[Auth] Heartbeat error:", e);
     return false;

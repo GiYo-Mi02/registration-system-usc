@@ -30,7 +30,8 @@ import {
   importCsvStudents, 
   resendTicket, 
   getEmailPreview, 
-  deleteStudent 
+  deleteStudent,
+  deleteAllStudents
 } from "../lib/api";
 
 interface AdminPanelProps {
@@ -63,6 +64,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   // Sync / Import state
   const [syncLoading, setSyncLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Resend failure simulation flag
   const [simulateResendFailure, setSimulateResendFailure] = useState(false);
@@ -106,7 +108,11 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   }
 
   if (emailFilter) {
-    filtered = filtered.filter(s => s.email_status === emailFilter);
+    if (emailFilter === "failed") {
+      filtered = filtered.filter(s => s.email_status === "failed" && s.email_error !== "queued");
+    } else {
+      filtered = filtered.filter(s => s.email_status === emailFilter);
+    }
   }
 
   // Paginate list
@@ -116,13 +122,17 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const paginatedStudents = filtered.slice(startIndex, startIndex + itemsPerPage);
 
   // Compute Statistics
+  const emailsSent = students.filter(s => s.email_status === "sent").length;
+  const emailsFailed = students.filter(s => s.email_status === "failed" && s.email_error !== "queued").length;
+  const emailsQueued = students.filter(s => s.email_status === "failed" && s.email_error === "queued").length;
+
   const stats: Stats = {
     total: students.length,
     attended: students.filter(s => s.scanned_at !== null && s.scanned_at !== undefined).length,
     attendanceRate: students.length > 0 ? Math.round((students.filter(s => s.scanned_at !== null && s.scanned_at !== undefined).length / students.length) * 100) : 0,
-    emailsSent: students.filter(s => s.email_status === "sent").length,
-    emailsFailed: students.filter(s => s.email_status === "failed").length,
-    emailSuccessRate: students.length > 0 ? Math.round((students.filter(s => s.email_status === "sent").length / students.length) * 100) : 0,
+    emailsSent,
+    emailsFailed,
+    emailSuccessRate: students.length > 0 ? Math.round((emailsSent / students.length) * 100) : 0,
   };
 
   // 1. Manual Add Form submit
@@ -265,6 +275,35 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     }
   };
 
+  // 6.5 Clear Event Registry (Delete All)
+  const handleClearRegistry = async () => {
+    const confirmClear = window.confirm(
+      `⚠️ WARNING: This will permanently delete ALL ${students.length} student registrations, tickets, QR codes, and attendance logs for "${selectedEvent.name}".\n\nAre you sure you want to proceed?`
+    );
+    if (!confirmClear) return;
+
+    const verifyName = window.prompt(`To confirm deletion, please type the event name exactly: "${selectedEvent.name}"`);
+    if (verifyName !== selectedEvent.name) {
+      alert("Verification failed. Registry clearing aborted.");
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      const res = await deleteAllStudents(auth.token || "", selectedEvent.id);
+      if (res.success) {
+        alert(`Event registry cleared successfully. Removed student records.`);
+        await onRefreshStudents();
+      } else {
+        alert(res.message || "Failed to clear registry.");
+      }
+    } catch (e) {
+      alert("Connection error clearing registry.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   // 7. Reset DB back to default 5 entries
   const handleResetDB = async () => {
     if (!confirm("Reset database to factory demo registrants? This will clear all attendance logs, sessions, and custom registrants.")) return;
@@ -403,6 +442,138 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
       </div>
 
+      {/* Real-time Email Dispatch Progress Tracker */}
+      {students.length > 0 && (
+        <div id="email-dispatch-tracker" className="bg-brand-primary p-6 rounded-3xl border border-brand-accent/20 shadow-xl space-y-4 animate-fade-in">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="space-y-1">
+              <h2 className="font-serif text-lg font-bold tracking-wide text-brand-text flex items-center gap-2">
+                <Mail className="w-5 h-5 text-brand-accent" />
+                Ticket Dispatch Pipeline
+              </h2>
+              <p className="text-xs text-brand-text/60 font-mono">
+                Real-time status of email ticket transmissions for this event
+              </p>
+            </div>
+            
+            {/* Real-time Status Badge */}
+            <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between bg-brand-primary-dark/50 px-4 py-2 rounded-2xl border border-brand-text/5">
+              <span className="text-xs text-brand-text/60 font-mono uppercase">Pipeline Status:</span>
+              {emailsQueued > 0 ? (
+                <span className="inline-flex items-center gap-1 text-blue-400 text-xs font-bold font-mono">
+                  <span className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-ping"></span>
+                  DISPATCHING ({emailsQueued} left)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-green-400 text-xs font-bold font-mono">
+                  <span className="w-2 text-emerald-500 rounded-full">●</span>
+                  STABLE / IDLE
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Progress Bar Container */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-end text-xs font-mono">
+              <span className="text-brand-text/80">
+                Processed: <span className="font-bold text-brand-text">{(emailsSent + emailsFailed)}</span> / {stats.total}
+              </span>
+              <span className="text-brand-accent font-bold">
+                {Math.round((stats.total > 0 ? ((emailsSent + emailsFailed) / stats.total) * 100 : 0))}% Complete
+              </span>
+            </div>
+            
+            <div className="h-4 w-full bg-brand-primary-dark border border-brand-text/10 rounded-full overflow-hidden relative shadow-inner">
+              {/* Sent progress (green) */}
+              <div 
+                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500 ease-out absolute left-0 top-0"
+                style={{ width: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%` }}
+              />
+              {/* Failed progress (red) */}
+              <div 
+                className="h-full bg-gradient-to-r from-red-500 to-rose-450 transition-all duration-500 ease-out absolute"
+                style={{ 
+                  left: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%`,
+                  width: `${stats.total > 0 ? (emailsFailed / stats.total) * 100 : 0}%` 
+                }}
+              />
+              {/* Pulsing indicator if active */}
+              {emailsQueued > 0 && (
+                <div 
+                  className="h-full bg-blue-400/30 absolute animate-pulse"
+                  style={{
+                    left: `${stats.total > 0 ? ((emailsSent + emailsFailed) / stats.total) * 100 : 0}%`,
+                    width: `${stats.total > 0 ? (emailsQueued / stats.total) * 100 : 0}%`
+                  }}
+                />
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 pt-2 text-center text-xs font-mono">
+              <div className="bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-2xl">
+                <span className="block text-[10px] uppercase font-bold text-emerald-400 mb-1">Delivered</span>
+                <span className="text-xl font-bold text-brand-text">{emailsSent}</span>
+              </div>
+              <div className="bg-blue-950/20 border border-blue-500/20 p-3 rounded-2xl">
+                <span className="block text-[10px] uppercase font-bold text-blue-400 mb-1">Queued</span>
+                <span className="text-xl font-bold text-brand-text">{emailsQueued}</span>
+              </div>
+              <div className="bg-red-950/20 border border-red-500/20 p-3 rounded-2xl">
+                <span className="block text-[10px] uppercase font-bold text-red-400 mb-1">Errors</span>
+                <span className="text-xl font-bold text-brand-text">{emailsFailed}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Failed Dispatches Report Panel */}
+          {emailsFailed > 0 && (
+            <div className="border-t border-brand-accent/15 pt-4 mt-2">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-xs uppercase font-bold font-mono text-red-400 flex items-center gap-1.5">
+                  <MailWarning className="w-4 h-4" /> Failed Dispatches Report ({emailsFailed})
+                </span>
+              </div>
+              
+              <div className="max-h-[220px] overflow-y-auto border border-brand-text/10 rounded-2xl bg-brand-primary-dark/40 shadow-inner divide-y divide-brand-text/5 text-[11px] font-mono">
+                {students
+                  .filter(s => s.email_status === "failed" && s.email_error !== "queued")
+                  .map(student => (
+                    <div key={student.id} className="p-3 flex justify-between items-center gap-4 hover:bg-brand-text/5 transition-all">
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-brand-text font-bold truncate max-w-[150px]">{student.full_name}</span>
+                          <span className="text-brand-text/40">({student.college})</span>
+                        </div>
+                        <span className="text-brand-text/60 truncate">{student.email}</span>
+                        <span className="text-red-400/90 text-[10px] mt-0.5 whitespace-pre-wrap leading-relaxed">
+                          ⚠️ Error: {student.email_error || "Unknown SMTP rejection"}
+                        </span>
+                      </div>
+                      
+                      <button
+                        onClick={() => handleResendEmail(student.id)}
+                        disabled={actionLoadingId === student.id}
+                        className="flex-shrink-0 px-3.5 py-1.5 bg-red-950/40 hover:bg-emerald-950/40 text-red-300 hover:text-emerald-300 border border-red-500/20 hover:border-emerald-500/30 rounded-xl font-semibold uppercase tracking-wider text-[9px] transition-all cursor-pointer flex items-center gap-1"
+                      >
+                        {actionLoadingId === student.id ? (
+                          <>
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Retrying
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-2.5 h-2.5" /> Resend
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Simulator / Sync Dashboard Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
@@ -419,7 +590,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <label
               id="admin-csv-import-label"
               className={`px-4 py-3.5 bg-brand-primary-dark hover:bg-brand-primary-light border border-brand-accent/20 hover:border-brand-accent/40 rounded-2xl text-xs font-semibold tracking-wider uppercase transition-all flex flex-col items-center justify-center gap-2 text-center text-brand-accent cursor-pointer shadow ${
@@ -449,6 +620,25 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             >
               <UserPlus className="w-5 h-5" />
               Manual Register
+            </button>
+
+            <button
+              id="admin-clear-registry-btn"
+              onClick={handleClearRegistry}
+              disabled={students.length === 0 || deleteLoading}
+              className="px-4 py-3.5 bg-brand-primary-dark hover:bg-red-950/40 border border-brand-accent/20 hover:border-red-500/30 rounded-2xl text-xs font-semibold tracking-wider uppercase transition-all flex flex-col items-center justify-center gap-2 text-center text-brand-text hover:text-red-300 cursor-pointer shadow disabled:opacity-30 disabled:pointer-events-none"
+            >
+              {deleteLoading ? (
+                <>
+                  <RefreshCw className="w-5 h-5 animate-spin text-red-400" />
+                  Clearing Registry...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-5 h-5 text-brand-accent" />
+                  Clear Registry
+                </>
+              )}
             </button>
           </div>
 
@@ -690,6 +880,10 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                       {s.email_status === "sent" ? (
                         <span className="inline-flex items-center gap-1 bg-green-950/40 text-green-300 px-2.5 py-1 rounded-full border border-green-500/20 text-[10px] font-semibold">
                           <Check className="w-2.5 h-2.5" /> Sent
+                        </span>
+                      ) : s.email_error === "queued" ? (
+                        <span className="inline-flex items-center gap-1 bg-blue-950/40 text-blue-300 px-2.5 py-1 rounded-full border border-blue-500/20 text-[10px] font-semibold animate-pulse">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Sending...
                         </span>
                       ) : (
                         <span 

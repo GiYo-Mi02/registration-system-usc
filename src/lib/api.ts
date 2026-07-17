@@ -101,6 +101,19 @@ export async function deleteStudent(token: string, studentId: string): Promise<{
   }
 }
 
+export async function deleteAllStudents(token: string, eventId: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await fetch(`/api/students?eventId=${eventId}&all=true`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const data = await res.json();
+    return { success: data.success, message: data.message };
+  } catch (e: any) {
+    return { success: false, message: e.message || "Network error clearing registry." };
+  }
+}
+
 export async function getEmailPreview(token: string, studentId: string): Promise<{ success: boolean; html?: string; message?: string }> {
   try {
     const res = await fetch(`/api/email-preview?studentId=${studentId}`, {
