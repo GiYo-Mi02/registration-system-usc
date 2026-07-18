@@ -64,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const eventDesc = eventInfo?.description || "";
 
     let insertedCount = 0;
+    const emailPromises: Promise<any>[] = [];
 
     for (const s of students) {
       const { full_name, email, college } = s;
@@ -129,8 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         insertedCount++;
 
-        // Send email and update status in background without blocking loop
-        sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
+        const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
           .then(async () => {
             await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
             await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
@@ -139,10 +139,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
             await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
           });
+        emailPromises.push(emailPromise);
 
       } catch (e) {
         console.error("Failed to import individual row:", e);
       }
+    }
+
+    if (emailPromises.length > 0) {
+      await Promise.allSettled(emailPromises);
     }
 
     return res.status(200).json({ success: true, insertedCount });
