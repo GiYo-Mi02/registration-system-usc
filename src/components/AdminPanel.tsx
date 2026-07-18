@@ -65,6 +65,13 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   // Sync / Import state
   const [syncLoading, setSyncLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [importProgress, setImportProgress] = useState<string | null>(null);
+  const [sendEmailsCheckbox, setSendEmailsCheckbox] = useState(true);
+
+  // Email Queue Dispatcher state
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchProgress, setDispatchProgress] = useState<string | null>(null);
+  const isDispatchingRef = React.useRef(false);
 
   // Resend failure simulation flag
   const [simulateResendFailure, setSimulateResendFailure] = useState(false);
@@ -125,6 +132,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const emailsSent = students.filter(s => s.email_status === "sent").length;
   const emailsFailed = students.filter(s => s.email_status === "failed" && s.email_error !== "queued").length;
   const emailsQueued = students.filter(s => s.email_status === "failed" && s.email_error === "queued").length;
+  const totalUnsent = students.filter(s => s.email_status === "failed").length;
 
   const stats: Stats = {
     total: students.length,
@@ -151,7 +159,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         full_name: newName,
         email: newEmail,
         college: newCollege,
-        eventId: selectedEvent.id
+        eventId: selectedEvent.id,
+        skipEmails: !sendEmailsCheckbox
       });
 
       if (!res.success) {
@@ -208,22 +217,107 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       }
 
       setSyncLoading(true);
+      setImportProgress("Starting import...");
+
+      const batchSize = 100;
+      let totalInserted = 0;
+      let failedBatches = 0;
+
       try {
-        const res = await importCsvStudents(auth.token || "", selectedEvent.id, parsedStudents);
-        if (res.success) {
-          alert(`CSV Imported successfully! Registered ${res.insertedCount} new student records.`);
-          onRefreshStudents();
-        } else {
-          alert(res.message || "Failed to import CSV.");
+        for (let i = 0; i < parsedStudents.length; i += batchSize) {
+          const chunk = parsedStudents.slice(i, i + batchSize);
+          const currentBatch = Math.floor(i / batchSize) + 1;
+          const totalBatches = Math.ceil(parsedStudents.length / batchSize);
+          
+          setImportProgress(`Importing (${currentBatch}/${totalBatches})...`);
+          
+          const res = await importCsvStudents(auth.token || "", selectedEvent.id, chunk, !sendEmailsCheckbox);
+          if (res.success) {
+            totalInserted += res.insertedCount || 0;
+          } else {
+            failedBatches++;
+          }
+          
+          // Small safety delay between batch database insertions
+          await new Promise(r => setTimeout(r, 1000));
         }
+
+        if (failedBatches > 0) {
+          alert(`Import complete, but some batches failed. Registered ${totalInserted} records.`);
+        } else {
+          alert(`CSV Imported successfully! Registered ${totalInserted} student records.`);
+        }
+        await onRefreshStudents();
       } catch (err) {
         alert("Connection error importing CSV.");
       } finally {
         setSyncLoading(false);
+        setImportProgress(null);
         e.target.value = "";
       }
     };
     reader.readAsText(file);
+  };
+
+  // 3. Email Queue Dispatch Loop
+  const startEmailDispatch = async () => {
+    if (isDispatching) return;
+    setIsDispatching(true);
+    isDispatchingRef.current = true;
+
+    const unsentStudents = students.filter(s => s.email_status === "failed");
+
+    if (unsentStudents.length === 0) {
+      alert("No unsent or queued tickets found in the student registry.");
+      setIsDispatching(false);
+      isDispatchingRef.current = false;
+      return;
+    }
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < unsentStudents.length; i++) {
+      if (!isDispatchingRef.current) {
+        setDispatchProgress("Dispatching paused.");
+        break;
+      }
+
+      const student = unsentStudents[i];
+      setDispatchProgress(`Sending to ${student.email} (${i + 1}/${unsentStudents.length})...`);
+
+      try {
+        const res = await resendTicket(auth.token || "", student.id);
+        if (res.success) {
+          sentCount++;
+        } else {
+          failedCount++;
+        }
+      } catch (err) {
+        failedCount++;
+      }
+
+      // Live refresh of UI statistics and tables
+      await onRefreshStudents();
+
+      // Delay exactly 4 seconds (4000ms) as requested
+      if (i < unsentStudents.length - 1 && isDispatchingRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
+    }
+
+    setIsDispatching(false);
+    isDispatchingRef.current = false;
+    setDispatchProgress(null);
+    await onRefreshStudents();
+
+    alert(`Email dispatch process finished.\nSuccess: ${sentCount}\nFailed: ${failedCount}`);
+  };
+
+  const pauseEmailDispatch = () => {
+    isDispatchingRef.current = false;
+    setIsDispatching(false);
+    setDispatchProgress("Pausing dispatch...");
   };
 
   // 4. Force Resend Email
@@ -386,6 +480,50 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           </button>
         </div>
       </div>
+
+      {/* Email Queue Dispatch Panel */}
+      {totalUnsent > 0 && (
+        <div id="email-queue-panel" className="bg-brand-primary p-6 rounded-3xl border border-brand-accent/20 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xl animate-fade-in">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-brand-accent/10 border border-brand-accent/30 flex items-center justify-center text-brand-accent">
+              <Mail className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h2 className="font-serif text-lg font-bold tracking-wide text-brand-text">
+                Email Ticket Queue Dispatcher
+              </h2>
+              <p className="text-xs text-brand-text/60 font-mono mt-0.5">
+                System detected <span className="text-brand-accent font-bold">{totalUnsent}</span> unsent/queued email tickets.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+            {dispatchProgress && (
+              <span className="text-xs text-brand-accent font-mono animate-pulse text-center sm:text-right">
+                {dispatchProgress}
+              </span>
+            )}
+            <div className="flex gap-2 w-full sm:w-auto">
+              {!isDispatching ? (
+                <button
+                  onClick={startEmailDispatch}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                >
+                  ▶️ Start Sending
+                </button>
+              ) : (
+                <button
+                  onClick={pauseEmailDispatch}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                >
+                  ⏸️ Pause Sending
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Statistics Block */}
       <div id="stats-panel" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -598,7 +736,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               }`}
             >
               <FileSpreadsheet className="w-5 h-5" />
-              {syncLoading ? "Importing CSV..." : "Import CSV File"}
+              {syncLoading ? (importProgress || "Importing CSV...") : "Import CSV File"}
               <input
                 type="file"
                 accept=".csv"
@@ -640,6 +778,20 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 </>
               )}
             </button>
+          </div>
+
+          {/* Email Delivery Toggle Checkbox */}
+          <div className="flex items-center gap-3 bg-brand-primary-dark/40 px-5 py-3.5 rounded-2xl border border-brand-accent/10 text-xs font-mono text-brand-text/80 shadow-md">
+            <input
+              id="send-emails-toggle"
+              type="checkbox"
+              checked={sendEmailsCheckbox}
+              onChange={(e) => setSendEmailsCheckbox(e.target.checked)}
+              className="w-4 h-4 rounded border-brand-accent/20 accent-brand-accent text-brand-accent cursor-pointer focus:ring-0"
+            />
+            <label htmlFor="send-emails-toggle" className="cursor-pointer select-none">
+              ✉️ Send ticket email notifications immediately upon registration / CSV import
+            </label>
           </div>
 
           {/* Manual Add Student Form */}

@@ -527,7 +527,7 @@ router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
 });
 
 router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, requireAdmin, async (req, res) => {
-  const { full_name, email, college, eventId } = req.body;
+  const { full_name, email, college, eventId, skipEmails } = req.body;
   if (!full_name || !email || !college || !eventId) {
     return res.status(400).json({ success: false, message: "All fields are required" });
   }
@@ -607,13 +607,15 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
       qr_data_url: qrDataUrl
     });
 
-    try {
-      await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-      await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-      await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-    } catch (e: any) {
-      await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-      await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+    if (!skipEmails) {
+      try {
+        await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+        await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+      } catch (e: any) {
+        await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+      }
     }
 
     const { data: updatedStudent } = await supabase
@@ -643,7 +645,7 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
 });
 
 router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, requireAdmin, async (req, res) => {
-  const { students, eventId } = req.body;
+  const { students, eventId, skipEmails } = req.body;
   if (!Array.isArray(students) || !eventId) {
     return res.status(400).json({ success: false, message: "Invalid payload: students array and eventId required" });
   }
@@ -725,16 +727,18 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
         qr_data_url: qrDataUrl
       });
 
-      const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
-        .then(async () => {
-          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-        })
-        .catch(async (e) => {
-          await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-          await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
-        });
-      emailPromises.push(emailPromise);
+      if (!skipEmails) {
+        const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
+          .then(async () => {
+            await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+            await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+          })
+          .catch(async (e) => {
+            await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
+            await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+          });
+        emailPromises.push(emailPromise);
+      }
 
       insertedCount++;
     } catch (err) {

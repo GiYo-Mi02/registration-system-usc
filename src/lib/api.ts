@@ -129,7 +129,7 @@ export async function getEmailPreview(token: string, studentId: string): Promise
 // ─── MANUAL ADD ────────────────────────────────────────────────────────────
 export async function addStudentManual(
   token: string,
-  payload: { full_name: string; email: string; college: string; eventId: string }
+  payload: { full_name: string; email: string; college: string; eventId: string; skipEmails?: boolean }
 ): Promise<{ success: boolean; message?: string }> {
   const res = await fetch("/api/manual-add", {
     method: "POST",
@@ -149,7 +149,8 @@ export async function addStudentManual(
 export async function importCsvStudents(
   token: string,
   eventId: string,
-  students: { full_name: string; email: string; college: string }[]
+  students: { full_name: string; email: string; college: string }[],
+  skipEmails?: boolean
 ): Promise<{ success: boolean; message?: string; insertedCount?: number }> {
   const res = await fetch("/api/import-csv", {
     method: "POST",
@@ -157,7 +158,7 @@ export async function importCsvStudents(
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}`
     },
-    body: JSON.stringify({ eventId, students }),
+    body: JSON.stringify({ eventId, students, skipEmails }),
   });
   if (!res.ok) {
     try { const d = await res.json(); return { success: false, message: d.message }; } catch { return { success: false, message: "Import failed" }; }

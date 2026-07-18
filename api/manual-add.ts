@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: "Method not allowed" });
   }
 
-  const { full_name, email, college, eventId } = req.body;
+  const { full_name, email, college, eventId, skipEmails } = req.body;
   if (!full_name || !email || !college || !eventId) {
     return res.status(400).json({ success: false, message: "All fields are required" });
   }
@@ -127,13 +127,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       qr_data_url: qrDataUrl
     });
 
-    try {
-      await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-      await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-      await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-    } catch (e: any) {
-      await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-      await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+    if (!skipEmails) {
+      try {
+        await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+        await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+      } catch (e: any) {
+        await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+      }
     }
 
     const { data: updatedStudent } = await supabase

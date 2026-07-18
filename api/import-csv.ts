@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: "Method not allowed" });
   }
 
-  const { students, eventId } = req.body;
+  const { students, eventId, skipEmails } = req.body;
   if (!Array.isArray(students) || !eventId) {
     return res.status(400).json({ success: false, message: "Invalid payload: students array and eventId required" });
   }
@@ -130,16 +130,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         insertedCount++;
 
-        const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
-          .then(async () => {
-            await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-          })
-          .catch(async (e) => {
-            await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
-          });
-        emailPromises.push(emailPromise);
+        if (!skipEmails) {
+          const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
+            .then(async () => {
+              await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+              await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+            })
+            .catch(async (e) => {
+              await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
+              await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+            });
+          emailPromises.push(emailPromise);
+        }
 
       } catch (e) {
         console.error("Failed to import individual row:", e);

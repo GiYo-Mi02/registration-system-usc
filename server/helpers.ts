@@ -1,8 +1,13 @@
 import nodemailer from "nodemailer";
 import { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } from "./config";
 
-// Setup Nodemailer SMTP transport
+// Setup Nodemailer SMTP transport with pooling and rate limiting
 const transporter = nodemailer.createTransport({
+  pool: true,                  // Reuses SMTP connections
+  maxConnections: 1,           // Limit to 1 connection to prevent concurrent login spam
+  maxMessages: 100,            // Recreate connection after 100 emails
+  rateLimit: 1,                // Send at most 1 email...
+  rateDelta: 4000,             // ...every 4 seconds (4000ms) to avoid Gmail spam filters
   host: SMTP_HOST,
   port: SMTP_PORT,
   secure: SMTP_PORT === 465, // true for port 465, false for 587
