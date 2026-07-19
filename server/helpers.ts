@@ -197,6 +197,15 @@ export function generateEmailTemplate(
                 </tr>
               </table>
 
+              <!-- QR Instructions Notice -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-top:16px;">
+                <tr>
+                  <td align="center" style="font-family:'Courier New', Courier, monospace; font-size:11px; color:#543847; font-weight:bold; line-height:1.4; padding:0 24px; text-align:center; text-transform:uppercase;">
+                    * You do not need to do anything with the QR code. Just present this to the registration committee to process your attendance. *
+                  </td>
+                </tr>
+              </table>
+
             </td>
           </tr>
 
@@ -222,7 +231,7 @@ export function generateEmailTemplate(
                 ⚡ ONE LIFE PASS ⚡
               </p>
               <p style="margin:0; line-height:1.5; opacity:0.85;">
-                This QR Code grants a single execution check-in. Any duplicate attempt will cause a registration crash. Do not share.
+                This QR Code grants a single execution check-in. You do not need to do anything with the QR code yourself—simply present this to the registration committee to process your attendance. Do not share.
               </p>
               <div style="margin-top:20px; font-size:9px; opacity:0.6; text-transform:uppercase;">
                 &copy; 2026 UNIVERSITY OF MAKATI &bull; Developer Head Gio Joshua Gonzales

@@ -54,6 +54,14 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
   const scannerId = "camera-viewfinder";
+  const resultRef = useRef<HTMLDivElement | null>(null);
+
+  // Smooth scroll into view when a scan succeeds/fails and shows the result card
+  useEffect(() => {
+    if (scanState !== "idle" && resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [scanState]);
 
   // Handle active webcam scanner initialization & cleanups
   useEffect(() => {
@@ -83,7 +91,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
         {
           fps: 10,
           qrbox: (width, height) => {
-            const size = Math.min(width, height) * 0.7;
+            const size = Math.min(width, height) * 0.75;
             return { width: size, height: size };
           }
         },
@@ -235,21 +243,40 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                   </button>
                 </div>
               ) : (
-                <div className="relative aspect-square w-full max-w-md mx-auto bg-black rounded-2xl overflow-hidden border-2 border-dashed border-brand-accent/30 flex flex-col justify-center items-center">
+                <div className={`relative aspect-square w-full max-w-xl mx-auto bg-black rounded-3xl overflow-hidden border-4 border-dashed transition-all duration-300 flex flex-col justify-center items-center ${
+                  scanState === "valid"
+                    ? "border-emerald-500 ring-8 ring-emerald-500/20"
+                    : scanState === "duplicate"
+                    ? "border-amber-500 ring-8 ring-amber-500/20"
+                    : scanState === "fake"
+                    ? "border-red-500 ring-8 ring-red-500/20"
+                    : "border-brand-accent/30"
+                }`}>
+                  {/* Status Flash Overlay */}
+                  {scanState !== "idle" && (
+                    <div className={`absolute inset-0 pointer-events-none animate-flash-overlay z-10 opacity-0 ${
+                      scanState === "valid"
+                        ? "bg-emerald-500/25"
+                        : scanState === "duplicate"
+                        ? "bg-amber-500/25"
+                        : "bg-red-500/25"
+                    }`}></div>
+                  )}
+
                   {/* Frame Target Overlays */}
-                  <div className="absolute inset-8 border border-white/20 rounded-xl pointer-events-none flex items-center justify-center">
-                    <div className="w-48 h-48 border-2 border-brand-accent rounded-lg relative animate-pulse">
-                      <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-brand-accent -translate-x-1 -translate-y-1"></div>
-                      <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-brand-accent translate-x-1 -translate-y-1"></div>
-                      <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-brand-accent -translate-x-1 translate-y-1"></div>
-                      <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-brand-accent translate-x-1 translate-y-1"></div>
+                  <div className="absolute inset-4 sm:inset-6 border border-white/10 rounded-2xl pointer-events-none flex items-center justify-center z-10">
+                    <div className="w-[80%] h-[80%] max-w-[320px] max-h-[320px] aspect-square border-2 border-brand-accent/30 rounded-2xl relative animate-pulse flex items-center justify-center">
+                      <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-brand-accent -translate-x-1 -translate-y-1 rounded-tl-md"></div>
+                      <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-brand-accent translate-x-1 -translate-y-1 rounded-tr-md"></div>
+                      <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-brand-accent -translate-x-1 translate-y-1 rounded-bl-md"></div>
+                      <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-brand-accent translate-x-1 translate-y-1 rounded-br-md"></div>
                     </div>
                   </div>
 
                   <div id={scannerId} className="w-full h-full object-cover"></div>
 
                   {scannerStatus === "scanning" && (
-                    <div className="absolute bottom-4 bg-brand-primary-dark/90 px-4 py-1.5 rounded-full text-[10px] font-mono tracking-widest text-brand-accent border border-brand-accent/20 animate-pulse uppercase">
+                    <div className="absolute bottom-4 bg-brand-primary-dark/95 px-5 py-2 rounded-full text-[10px] sm:text-xs font-mono tracking-widest text-brand-accent border border-brand-accent/20 animate-pulse uppercase z-10">
                       📹 Active Lens scanning...
                     </div>
                   )}
@@ -264,36 +291,55 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
               {/* Scan Result Alert Card for Camera */}
               {scanState !== "idle" && (
-                <div className={`mt-6 p-4 rounded-2xl border text-left flex items-start gap-3 shadow-lg animate-fade-in relative ${
-                  scanState === "valid" 
-                    ? "bg-emerald-950/80 border-emerald-500/30 text-emerald-100" 
-                    : scanState === "duplicate"
-                    ? "bg-amber-950/80 border-amber-500/30 text-amber-100"
-                    : "bg-red-950/80 border-red-500/30 text-red-100"
-                }`}>
-                  {scanState === "valid" && <CheckCircle className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />}
-                  {scanState === "duplicate" && <AlertTriangle className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />}
-                  {scanState === "fake" && <FileWarning className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />}
-                  <div className="flex-1 space-y-1">
-                    <div className="flex justify-between items-start">
-                      <h4 className="font-serif text-xs font-bold uppercase tracking-wider">
+                <div 
+                  ref={resultRef}
+                  className={`mt-6 p-5 sm:p-6 rounded-3xl border text-left flex items-center gap-4 md:gap-5 shadow-2xl animate-fade-in relative transition-all duration-300 ${
+                    scanState === "valid" 
+                      ? "bg-emerald-900/90 border-emerald-500/40 text-emerald-100 ring-2 ring-emerald-500/20" 
+                      : scanState === "duplicate"
+                      ? "bg-amber-900/90 border-amber-500/40 text-amber-100 ring-2 ring-amber-500/20"
+                      : "bg-red-900/90 border-red-500/40 text-red-100 ring-2 ring-red-500/20"
+                  }`}
+                >
+                  <div className="shrink-0 p-2.5 rounded-2xl bg-white/5 border border-white/10">
+                    {scanState === "valid" && <CheckCircle className="w-10 h-10 md:w-12 md:h-12 text-emerald-400" />}
+                    {scanState === "duplicate" && <AlertTriangle className="w-10 h-10 md:w-12 md:h-12 text-amber-400" />}
+                    {scanState === "fake" && <FileWarning className="w-10 h-10 md:w-12 md:h-12 text-red-400" />}
+                  </div>
+
+                  <div className="flex-1 space-y-1.5 min-w-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="font-serif text-sm md:text-base font-bold uppercase tracking-wider">
                         {scanState === "valid" ? "Access Granted" : scanState === "duplicate" ? "Duplicate Entry" : "Access Denied"}
                       </h4>
-                      <span className="text-[9px] font-mono opacity-60 bg-white/5 px-1.5 py-0.5 rounded">AUTO-CLEARING</span>
+                      <span className="text-[10px] md:text-xs font-mono font-bold tracking-wide opacity-85 bg-black/30 border border-white/10 px-2 py-0.5 rounded">
+                        AUTO-CLEAR
+                      </span>
                     </div>
+
                     {scanState === "fake" ? (
-                      <p className="text-xs">{scanResult?.message || "HMAC verification failed."}</p>
+                      <p className="text-sm font-semibold break-words leading-relaxed text-white">{scanResult?.message || "HMAC verification failed."}</p>
                     ) : (
-                      <>
-                        <p className="text-xs font-semibold text-white">{scanResult?.student?.full_name}</p>
-                        <p className="text-[10px] opacity-75 font-mono">
-                          College: {scanResult?.student?.college} | {scanState === "valid" ? (scanResult?.time_string || "Just now") : `Scanned at ${scanResult?.original_time} by [${scanResult?.scanned_by_name}]`}
+                      <div className="space-y-0.5">
+                        <p className="text-base md:text-lg font-extrabold text-white truncate tracking-wide">{scanResult?.student?.full_name}</p>
+                        <p className="text-xs md:text-sm opacity-90 font-mono leading-normal">
+                          College: <span className="text-white font-semibold">{scanResult?.student?.college}</span>
                         </p>
-                      </>
+                        <p className="text-[10px] md:text-xs opacity-75 font-mono">
+                          {scanState === "valid" 
+                            ? `🕒 Checked In: ${scanResult?.time_string || "Just now"}`
+                            : `⚠️ Checked In: ${scanResult?.original_time} by @${scanResult?.scanned_by_name || "unknown"}`
+                          }
+                        </p>
+                      </div>
                     )}
                   </div>
-                  <button onClick={handleResetScanState} className="opacity-60 hover:opacity-100 cursor-pointer ml-1 p-0.5 border-none bg-transparent">
-                    <X className="w-4 h-4" />
+
+                  <button 
+                    onClick={handleResetScanState} 
+                    className="absolute top-4 right-4 text-white/60 hover:text-white hover:bg-white/10 p-1.5 rounded-full cursor-pointer transition-all"
+                  >
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
               )}
