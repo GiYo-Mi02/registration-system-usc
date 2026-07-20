@@ -22,12 +22,20 @@ interface ScannerPanelProps {
   onLogout: () => void;
 }
 
+interface CameraDevice {
+  id: string;
+  label: string;
+}
+
 export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLogout }: ScannerPanelProps) {
   const [scannerStatus, setScannerStatus] = useState<"idle" | "scanning" | "error">("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
   
   // Scanned states: idle, valid, duplicate, fake
   const [scanState, setScanState] = useState<"idle" | "valid" | "duplicate" | "fake">("idle");
+
+  const [cameras, setCameras] = useState<CameraDevice[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string>("");
 
   const lastScannedTokenRef = useRef<string>("");
   const lastScannedTimestampRef = useRef<number>(0);
@@ -65,31 +73,63 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
   // Handle active webcam scanner initialization & cleanups
   useEffect(() => {
-    startWebcamScanner();
+    let active = true;
+
+    const initCameras = async () => {
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (!active) return;
+
+        if (devices && devices.length > 0) {
+          setCameras(devices);
+          // Look for a back/rear camera to select as default
+          const backCamera = devices.find(d => {
+            const label = d.label.toLowerCase();
+            return label.includes("back") || 
+                   label.includes("rear") || 
+                   label.includes("environment") || 
+                   label.includes("main");
+          });
+          const defaultId = backCamera ? backCamera.id : devices[0].id;
+          setSelectedCameraId(defaultId);
+          await startWebcamScanner(defaultId);
+        } else {
+          await startWebcamScanner(null);
+        }
+      } catch (err) {
+        console.warn("Unable to enumerate cameras, falling back to facingMode", err);
+        if (!active) return;
+        await startWebcamScanner(null);
+      }
+    };
+
+    initCameras();
 
     return () => {
+      active = false;
       stopWebcamScanner();
     };
   }, []);
 
-  const startWebcamScanner = async () => {
+  const startWebcamScanner = async (cameraIdToUse?: string | null) => {
     setCameraError(null);
     setScannerStatus("scanning");
     try {
       // Ensure existing is stopped
-      if (html5QrcodeRef.current) {
-        try {
-          await html5QrcodeRef.current.stop();
-        } catch (e) {}
-      }
+      await stopWebcamScanner();
 
-      const scannerInstance = new Html5Qrcode(scannerId);
+      const scannerInstance = new Html5Qrcode(scannerId, {
+        verbose: false,
+        useBarCodeDetectorIfSupported: true
+      });
       html5QrcodeRef.current = scannerInstance;
 
+      const cameraTarget = cameraIdToUse || { facingMode: "environment" };
+
       await scannerInstance.start(
-        { facingMode: "environment" },
+        cameraTarget,
         {
-          fps: 10,
+          fps: 20,
           qrbox: (width, height) => {
             const size = Math.min(width, height) * 0.75;
             return { width: size, height: size };
@@ -128,6 +168,11 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       }
     }
     setScannerStatus("idle");
+  };
+
+  const handleCameraChange = async (cameraId: string) => {
+    setSelectedCameraId(cameraId);
+    await startWebcamScanner(cameraId);
   };
 
   // Central Cryptographic verification router — calls Supabase RPC directly
@@ -225,6 +270,26 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                 <Camera className="w-5 h-5 text-brand-accent" />
                 Live Viewfinder
               </h3>
+
+              {cameras.length > 1 && (
+                <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-2 bg-brand-primary-dark/50 p-3 rounded-2xl border border-brand-accent/10">
+                  <label htmlFor="camera-select" className="text-xs font-mono text-brand-text/60 uppercase shrink-0">
+                    Camera Source:
+                  </label>
+                  <select
+                    id="camera-select"
+                    value={selectedCameraId}
+                    onChange={(e) => handleCameraChange(e.target.value)}
+                    className="w-full bg-brand-primary-dark border border-brand-accent/20 rounded-xl px-3 py-2 text-xs text-brand-text focus:outline-none focus:border-brand-accent/60 transition-all cursor-pointer"
+                  >
+                    {cameras.map((camera) => (
+                      <option key={camera.id} value={camera.id}>
+                        {camera.label || `Camera ${camera.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {cameraError ? (
                 <div className="bg-red-950/40 border border-red-500/30 p-6 rounded-2xl text-center space-y-4">

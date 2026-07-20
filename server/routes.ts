@@ -839,6 +839,53 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
   }
 });
 
+router.post("/api/reset-emails", authenticateToken, requireAdmin, async (req, res) => {
+  const { eventId, emails } = req.body;
+  if (!eventId) {
+    return res.status(400).json({ success: false, message: "eventId parameter is required." });
+  }
+
+  try {
+    let query = supabase
+      .from("students")
+      .select("id")
+      .eq("event_id", eventId);
+
+    if (Array.isArray(emails) && emails.length > 0) {
+      const normalizedEmails = emails.map(e => e.trim().toLowerCase());
+      query = query.in("email", normalizedEmails);
+    }
+
+    const { data: students, error: fetchErr } = await query;
+
+    if (fetchErr) throw fetchErr;
+
+    const studentIds = (students || []).map(s => s.id);
+
+    if (studentIds.length > 0) {
+      const { error: updateErr } = await supabase
+        .from("students")
+        .update({ email_status: "failed", email_error: null })
+        .in("id", studentIds);
+
+      if (updateErr) throw updateErr;
+
+      const { error: logErr } = await supabase
+        .from("email_log")
+        .update({ status: "failed", error_message: "queued" })
+        .in("student_id", studentIds);
+
+      if (logErr) throw logErr;
+    }
+
+    notifyClients("bulk_update", { eventId });
+    return res.json({ success: true, count: studentIds.length });
+  } catch (err: any) {
+    console.error("Reset emails error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Failed to reset student email statuses." });
+  }
+});
+
 router.delete("/api/students", authenticateToken, requireAdmin, async (req, res) => {
   const eventId = req.query.eventId as string;
   const all = req.query.all === "true";

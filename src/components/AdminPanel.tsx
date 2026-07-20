@@ -22,7 +22,8 @@ import {
   ArrowRight,
   Eye,
   LogOut,
-  Settings
+  Settings,
+  ClipboardList
 } from "lucide-react";
 import { AuthState, Student, Stats, Event } from "../types";
 import { 
@@ -31,8 +32,28 @@ import {
   resendTicket, 
   getEmailPreview, 
   deleteStudent,
-  deleteAllStudents
+  deleteAllStudents,
+  resetEmailStatuses
 } from "../lib/api";
+
+function parseCSVLine(line: string): string[] {
+  const fields: string[] = [];
+  let currentField = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      fields.push(currentField.trim());
+      currentField = "";
+    } else {
+      currentField += char;
+    }
+  }
+  fields.push(currentField.trim());
+  return fields;
+}
 
 interface AdminPanelProps {
   auth: AuthState;
@@ -62,6 +83,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
+  // Bulk Paste CSV form
+  const [showBulkPasteForm, setShowBulkPasteForm] = useState(false);
+  const [bulkPasteText, setBulkPasteText] = useState("");
+  const [bulkPasteError, setBulkPasteError] = useState<string | null>(null);
+  const [bulkPasteMode, setBulkPasteMode] = useState<"import" | "reset">("import");
+
   // Sync / Import state
   const [syncLoading, setSyncLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -72,6 +99,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchProgress, setDispatchProgress] = useState<string | null>(null);
   const isDispatchingRef = React.useRef(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   // Resend failure simulation flag
   const [simulateResendFailure, setSimulateResendFailure] = useState(false);
@@ -197,9 +225,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         const line = lines[i].trim();
         if (!line) continue;
 
-        // Split fields by comma, respecting quotes
-        const match = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(",");
-        const fields = match.map(f => f.replace(/^"|"$/g, '').trim());
+        const fields = parseCSVLine(line);
 
         if (fields.length >= 3) {
           const full_name = fields[0];
@@ -258,6 +284,114 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     };
     reader.readAsText(file);
   };
+
+  const handleBulkPasteImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBulkPasteError(null);
+
+    if (!bulkPasteText.trim()) {
+      setBulkPasteError("Please paste some CSV content first.");
+      return;
+    }
+
+    const lines = bulkPasteText.split(/\r?\n/);
+    const parsedStudents: { full_name: string; email: string; college: string }[] = [];
+
+    // Detect if first line contains header fields like name/email/college
+    let startIndex = 0;
+    const firstLine = lines[0].toLowerCase().trim();
+    if (firstLine.includes("name") || firstLine.includes("email") || firstLine.includes("college")) {
+      startIndex = 1; // Skip header line
+    }
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const fields = parseCSVLine(line);
+
+      if (fields.length >= 3) {
+        const full_name = fields[0];
+        const email = fields[1];
+        const college = fields[2];
+        if (full_name && email && college) {
+          parsedStudents.push({ full_name, email, college });
+        }
+      }
+    }
+
+    if (parsedStudents.length === 0) {
+      setBulkPasteError("No valid rows found. Ensure formatting is: name,email,college");
+      return;
+    }
+
+    setSyncLoading(true);
+
+    if (bulkPasteMode === "reset") {
+      setImportProgress("Resetting email statuses...");
+      try {
+        const emails = parsedStudents.map(s => s.email);
+        const res = await resetEmailStatuses(auth.token || "", selectedEvent.id, emails);
+        if (res.success) {
+          alert(`Success! Email statuses reset for ${res.count || emails.length} matching students. You can now use the Queue Dispatcher below to bulk resend.`);
+          setBulkPasteText("");
+          setShowBulkPasteForm(false);
+          await onRefreshStudents();
+        } else {
+          setBulkPasteError(res.message || "Failed to reset student email statuses.");
+        }
+      } catch (err) {
+        setBulkPasteError("Connection error resetting email statuses.");
+      } finally {
+        setSyncLoading(false);
+        setImportProgress(null);
+      }
+      return;
+    }
+
+    setImportProgress("Starting batch import...");
+
+    const batchSize = 100;
+    let totalInserted = 0;
+    let failedBatches = 0;
+
+    try {
+      for (let i = 0; i < parsedStudents.length; i += batchSize) {
+        const chunk = parsedStudents.slice(i, i + batchSize);
+        const currentBatch = Math.floor(i / batchSize) + 1;
+        const totalBatches = Math.ceil(parsedStudents.length / batchSize);
+        
+        setImportProgress(`Importing pasted batch (${currentBatch}/${totalBatches})...`);
+        
+        const res = await importCsvStudents(auth.token || "", selectedEvent.id, chunk, !sendEmailsCheckbox);
+        if (res.success) {
+          totalInserted += res.insertedCount || 0;
+        } else {
+          failedBatches++;
+        }
+        
+        // Small safety delay between batch database insertions
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (failedBatches > 0) {
+        alert(`Import complete, but some batches failed. Registered ${totalInserted} records.`);
+      } else {
+        alert(`Pasted CSV data imported successfully! Registered ${totalInserted} student records.`);
+      }
+      
+      setBulkPasteText("");
+      setShowBulkPasteForm(false);
+      await onRefreshStudents();
+    } catch (err) {
+      setBulkPasteError("Connection error importing pasted data.");
+    } finally {
+      setSyncLoading(false);
+      setImportProgress(null);
+    }
+  };
+
+
 
   // 3. Email Queue Dispatch Loop
   const startEmailDispatch = async () => {
@@ -398,6 +532,28 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     }
   };
 
+  const handleResetAllEmails = async () => {
+    const confirmReset = window.confirm(
+      `⚠️ WARNING: This will reset the ticket email sending status for ALL ${students.length} students registered for "${selectedEvent.name}" back to "Failed / Queued".\n\nThis will allow you to run a bulk resend to all registrants. Are you sure you want to proceed?`
+    );
+    if (!confirmReset) return;
+
+    setResetLoading(true);
+    try {
+      const res = await resetEmailStatuses(auth.token || "", selectedEvent.id);
+      if (res.success) {
+        alert(`All student email statuses reset successfully. You can now use the Queue Dispatcher below to bulk resend.`);
+        await onRefreshStudents();
+      } else {
+        alert(res.message || "Failed to reset email statuses.");
+      }
+    } catch (e) {
+      alert("Connection error resetting email statuses.");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   // 7. Reset DB back to default 5 entries
   const handleResetDB = async () => {
     if (!confirm("Reset database to factory demo registrants? This will clear all attendance logs, sessions, and custom registrants.")) return;
@@ -482,7 +638,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       </div>
 
       {/* Email Queue Dispatch Panel */}
-      {totalUnsent > 0 && (
+      {stats.total > 0 && (
         <div id="email-queue-panel" className="bg-brand-primary p-6 rounded-3xl border border-brand-accent/20 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xl animate-fade-in">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-full bg-brand-accent/10 border border-brand-accent/30 flex items-center justify-center text-brand-accent">
@@ -493,7 +649,11 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 Email Ticket Queue Dispatcher
               </h2>
               <p className="text-xs text-brand-text/60 font-mono mt-0.5">
-                System detected <span className="text-brand-accent font-bold">{totalUnsent}</span> unsent/queued email tickets.
+                {totalUnsent > 0 ? (
+                  <>System detected <span className="text-brand-accent font-bold">{totalUnsent}</span> unsent/queued email tickets.</>
+                ) : (
+                  <>✨ All ticket emails sent successfully! (0 unsent/queued).</>
+                )}
               </p>
             </div>
           </div>
@@ -504,20 +664,41 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 {dispatchProgress}
               </span>
             )}
-            <div className="flex gap-2 w-full sm:w-auto">
-              {!isDispatching ? (
-                <button
-                  onClick={startEmailDispatch}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                >
-                  ▶️ Start Sending
-                </button>
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-center sm:justify-end">
+              {totalUnsent > 0 ? (
+                <>
+                  {!isDispatching ? (
+                    <>
+                      <button
+                        onClick={startEmailDispatch}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        ▶️ Start Sending
+                      </button>
+                      <button
+                        onClick={handleResetAllEmails}
+                        disabled={resetLoading}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-brand-primary-dark hover:bg-brand-primary-light text-brand-accent border border-brand-accent/20 hover:border-brand-accent/60 font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        {resetLoading ? "Resetting..." : "🔄 Reset All"}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={pauseEmailDispatch}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                    >
+                      ⏸️ Pause Sending
+                    </button>
+                  )}
+                </>
               ) : (
                 <button
-                  onClick={pauseEmailDispatch}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                  onClick={handleResetAllEmails}
+                  disabled={resetLoading}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
-                  ⏸️ Pause Sending
+                  {resetLoading ? "Resetting..." : "🔄 Reset All (Bulk Resend)"}
                 </button>
               )}
             </div>
@@ -728,7 +909,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <label
               id="admin-csv-import-label"
               className={`px-4 py-3.5 bg-brand-primary-dark hover:bg-brand-primary-light border border-brand-accent/20 hover:border-brand-accent/40 rounded-2xl text-xs font-semibold tracking-wider uppercase transition-all flex flex-col items-center justify-center gap-2 text-center text-brand-accent cursor-pointer shadow ${
@@ -746,9 +927,26 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             </label>
 
             <button
+              id="admin-toggle-bulk-paste-btn"
+              onClick={() => {
+                setShowBulkPasteForm(!showBulkPasteForm);
+                if (showAddForm) setShowAddForm(false);
+              }}
+              className={`px-4 py-3.5 border rounded-2xl text-xs font-semibold tracking-wider uppercase transition-all flex flex-col items-center justify-center gap-2 text-center cursor-pointer shadow ${
+                showBulkPasteForm
+                  ? "bg-brand-accent text-brand-primary-dark border-brand-accent"
+                  : "bg-brand-primary-dark hover:bg-brand-primary-light border-brand-accent/20 hover:border-brand-accent/40 text-brand-text"
+              }`}
+            >
+              <ClipboardList className="w-5 h-5" />
+              Bulk Paste CSV
+            </button>
+
+            <button
               id="admin-toggle-add-btn"
               onClick={() => {
                 setShowAddForm(!showAddForm);
+                if (showBulkPasteForm) setShowBulkPasteForm(false);
               }}
               className={`px-4 py-3.5 border rounded-2xl text-xs font-semibold tracking-wider uppercase transition-all flex flex-col items-center justify-center gap-2 text-center cursor-pointer shadow ${
                 showAddForm
@@ -858,6 +1056,84 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 >
                   {addLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                   Register &amp; Deliver QR
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Bulk Paste CSV Form */}
+          {showBulkPasteForm && (
+            <form onSubmit={handleBulkPasteImport} className="p-5 bg-brand-primary-dark/60 rounded-2xl border border-brand-accent/10 space-y-4 animate-fade-in">
+              <div className="flex justify-between items-center">
+                <h3 className="font-serif text-sm font-bold uppercase tracking-wider text-brand-accent">
+                  📋 Bulk Paste CSV Registrants
+                </h3>
+                <span className="text-[10px] font-mono opacity-60">Format: name,email,college</span>
+              </div>
+
+              {bulkPasteError && <div className="text-xs text-red-400 bg-red-950/20 p-2.5 rounded border border-red-500/20">{bulkPasteError}</div>}
+
+              {/* Mode Selector */}
+              <div className="flex flex-col sm:flex-row gap-4 bg-brand-primary-dark/40 p-3 rounded-xl border border-brand-accent/5">
+                <label className="flex items-center gap-2 text-xs text-brand-text cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="bulkPasteMode"
+                    value="import"
+                    checked={bulkPasteMode === "import"}
+                    onChange={() => setBulkPasteMode("import")}
+                    className="accent-brand-accent cursor-pointer w-3.5 h-3.5"
+                  />
+                  📥 Register New Students
+                </label>
+                <label className="flex items-center gap-2 text-xs text-brand-text cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="bulkPasteMode"
+                    value="reset"
+                    checked={bulkPasteMode === "reset"}
+                    onChange={() => setBulkPasteMode("reset")}
+                    className="accent-brand-accent cursor-pointer w-3.5 h-3.5"
+                  />
+                  🔄 Queue Resend to Existing
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60">
+                  {bulkPasteMode === "import" ? "Paste CSV to Register" : "Paste CSV of Students to Resend"}
+                </label>
+                <textarea
+                  id="bulk-paste-textarea"
+                  rows={6}
+                  required
+                  value={bulkPasteText}
+                  onChange={(e) => setBulkPasteText(e.target.value)}
+                  placeholder="name,email,college&#10;John Doe,john@example.com,College of Science&#10;Jane Smith,jane@example.com,College of Engineering"
+                  className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text font-mono focus:outline-none focus:border-brand-accent placeholder-brand-text/25"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBulkPasteForm(false);
+                    setBulkPasteText("");
+                    setBulkPasteError(null);
+                  }}
+                  className="px-4 py-2 bg-transparent text-brand-text/60 hover:text-brand-text text-xs font-semibold tracking-wider uppercase cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="bulk-paste-submit-btn"
+                  type="submit"
+                  disabled={syncLoading}
+                  className="px-5 py-2.5 bg-brand-accent text-brand-primary-dark text-xs font-bold tracking-wider uppercase rounded-xl hover:bg-brand-accent/90 disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                >
+                  {syncLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  {syncLoading ? (importProgress || "Importing...") : bulkPasteMode === "import" ? "Register Batch" : "Queue Resends"}
                 </button>
               </div>
             </form>
