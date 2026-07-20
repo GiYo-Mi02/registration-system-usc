@@ -747,11 +747,114 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
   }
 
   if (emailPromises.length > 0) {
-    await Promise.allSettled(emailPromises);
+    Promise.allSettled(emailPromises).then(() => {
+      notifyClients("bulk_sync", {});
+    });
+  } else {
+    notifyClients("bulk_sync", {});
   }
 
-  notifyClients("bulk_sync", {});
   return res.json({ success: true, insertedCount });
+});
+
+router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken, requireAdmin, async (req, res) => {
+  const { eventId } = req.body;
+  if (!eventId) {
+    return res.status(400).json({ success: false, message: "eventId is required" });
+  }
+
+  try {
+    const { data: failedStudents, error } = await supabase
+      .from("students")
+      .select("*")
+      .eq("event_id", eventId)
+      .eq("email_status", "failed");
+
+    if (error) throw error;
+
+    if (!failedStudents || failedStudents.length === 0) {
+      return res.json({ success: true, count: 0, message: "No failed emails found." });
+    }
+
+    const { data: eventInfo } = await supabase
+      .from("events")
+      .select("*")
+      .eq("id", eventId)
+      .single();
+
+    const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+    const eventDate = eventInfo?.event_date || "October 24, 2026";
+    const eventVenue = eventInfo?.venue || "UMak Grand Theater";
+    const eventDesc = eventInfo?.description || "";
+
+    const studentIds = failedStudents.map(s => s.id);
+    await supabase.from("students")
+      .update({ email_status: "failed", email_error: "queued" })
+      .in("id", studentIds);
+
+    const emailPromises: Promise<any>[] = [];
+
+    for (const student of failedStudents) {
+      const emailPromise = (async () => {
+        try {
+          let { data: tokenRecord } = await supabase
+            .from("qr_tokens")
+            .select("token")
+            .eq("student_id", student.id)
+            .maybeSingle();
+
+          if (!tokenRecord) {
+            const nonce = crypto.randomBytes(8).toString("hex");
+            const payload = `${student.id}:${eventId}:${nonce}`;
+            const hmac = crypto.createHmac("sha256", QR_SECRET).update(payload).digest("hex");
+            const signedToken = `${payload}:${hmac}`;
+
+            await supabase.from("qr_tokens").insert({
+              student_id: student.id,
+              event_id: eventId,
+              token: signedToken
+            });
+            tokenRecord = { token: signedToken };
+          }
+
+          const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
+          const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+
+          await supabase.from("email_log")
+            .upsert({
+              student_id: student.id,
+              status: "sent",
+              error_message: null,
+              email_html: emailHtml,
+              qr_data_url: qrDataUrl,
+              sent_at: new Date().toISOString()
+            }, { onConflict: "student_id" });
+
+          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+
+          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+        } catch (err: any) {
+          console.error(`Failed to background resend email:`, err);
+          try {
+            await supabase.from("students").update({ email_status: "failed", email_error: err.message }).eq("id", student.id);
+            await supabase.from("email_log").update({ status: "failed", error_message: err.message }).eq("student_id", student.id);
+          } catch {}
+        }
+      })();
+      emailPromises.push(emailPromise);
+    }
+
+    if (emailPromises.length > 0) {
+      Promise.allSettled(emailPromises).then(() => {
+        notifyClients("bulk_sync", {});
+      });
+    }
+
+    return res.json({ success: true, count: failedStudents.length });
+  } catch (err: any) {
+    console.error("Bulk resend error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Failed to trigger bulk resend." });
+  }
 });
 
 router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requireAdmin, async (req, res) => {

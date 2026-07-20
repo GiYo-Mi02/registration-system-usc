@@ -33,7 +33,8 @@ import {
   getEmailPreview, 
   deleteStudent,
   deleteAllStudents,
-  resetEmailStatuses
+  resetEmailStatuses,
+  resendBulk
 } from "../lib/api";
 
 function parseCSVLine(line: string): string[] {
@@ -408,44 +409,23 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       return;
     }
 
-    let sentCount = 0;
-    let failedCount = 0;
+    setDispatchProgress("Triggering background bulk email resend on the server...");
 
-    for (let i = 0; i < unsentStudents.length; i++) {
-      if (!isDispatchingRef.current) {
-        setDispatchProgress("Dispatching paused.");
-        break;
+    try {
+      const res = await resendBulk(auth.token || "", selectedEvent.id);
+      if (res.success) {
+        alert(`Bulk resending triggered successfully for ${res.count || unsentStudents.length} students! The server is sending them in the background. You can track progress below.`);
+      } else {
+        alert(`Failed to start bulk resend: ${res.message || "Unknown error"}`);
       }
-
-      const student = unsentStudents[i];
-      setDispatchProgress(`Sending to ${student.email} (${i + 1}/${unsentStudents.length})...`);
-
-      try {
-        const res = await resendTicket(auth.token || "", student.id);
-        if (res.success) {
-          sentCount++;
-        } else {
-          failedCount++;
-        }
-      } catch (err) {
-        failedCount++;
-      }
-
-      // Live refresh of UI statistics and tables
+    } catch (err) {
+      alert("Connection error starting bulk resend.");
+    } finally {
+      setIsDispatching(false);
+      isDispatchingRef.current = false;
+      setDispatchProgress(null);
       await onRefreshStudents();
-
-      // Delay exactly 4 seconds (4000ms) as requested
-      if (i < unsentStudents.length - 1 && isDispatchingRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 4000));
-      }
     }
-
-    setIsDispatching(false);
-    isDispatchingRef.current = false;
-    setDispatchProgress(null);
-    await onRefreshStudents();
-
-    alert(`Email dispatch process finished.\nSuccess: ${sentCount}\nFailed: ${failedCount}`);
   };
 
   const pauseEmailDispatch = () => {

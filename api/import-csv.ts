@@ -149,7 +149,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (emailPromises.length > 0) {
-      await Promise.allSettled(emailPromises);
+      Promise.allSettled(emailPromises);
     }
 
     return res.status(200).json({ success: true, insertedCount });
