@@ -131,7 +131,7 @@ export async function resetEmailStatuses(token: string, eventId: string, emails?
   }
 }
 
-export async function resendBulk(token: string, eventId: string): Promise<{ success: boolean; message?: string; count?: number }> {
+export async function resendBulk(token: string, eventId: string, target?: "failed" | "not_attended"): Promise<{ success: boolean; message?: string; count?: number }> {
   try {
     const res = await fetch("/api/resend-bulk", {
       method: "POST",
@@ -139,7 +139,7 @@ export async function resendBulk(token: string, eventId: string): Promise<{ succ
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ eventId })
+      body: JSON.stringify({ eventId, target })
     });
     const data = await res.json();
     return { success: data.success, message: data.message, count: data.count };

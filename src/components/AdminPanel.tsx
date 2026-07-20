@@ -395,15 +395,17 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
 
   // 3. Email Queue Dispatch Loop
-  const startEmailDispatch = async () => {
+  const startEmailDispatch = async (target: "failed" | "not_attended" = "failed") => {
     if (isDispatching) return;
     setIsDispatching(true);
     isDispatchingRef.current = true;
 
-    const unsentStudents = students.filter(s => s.email_status === "failed");
+    const targetCount = target === "not_attended"
+      ? students.filter(s => s.scanned_at === null || s.scanned_at === undefined).length
+      : students.filter(s => s.email_status === "failed").length;
 
-    if (unsentStudents.length === 0) {
-      alert("No unsent or queued tickets found in the student registry.");
+    if (targetCount === 0) {
+      alert("No matching students found to resend tickets.");
       setIsDispatching(false);
       isDispatchingRef.current = false;
       return;
@@ -412,9 +414,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     setDispatchProgress("Triggering background bulk email resend on the server...");
 
     try {
-      const res = await resendBulk(auth.token || "", selectedEvent.id);
+      const res = await resendBulk(auth.token || "", selectedEvent.id, target);
       if (res.success) {
-        alert(`Bulk resending triggered successfully for ${res.count || unsentStudents.length} students! The server is sending them in the background. You can track progress below.`);
+        alert(`Bulk resending triggered successfully for ${res.count || targetCount} students! The server is sending them in the background. You can track progress below.`);
       } else {
         alert(`Failed to start bulk resend: ${res.message || "Unknown error"}`);
       }
@@ -630,9 +632,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               </h2>
               <p className="text-xs text-brand-text/60 font-mono mt-0.5">
                 {totalUnsent > 0 ? (
-                  <>System detected <span className="text-brand-accent font-bold">{totalUnsent}</span> unsent/queued email tickets.</>
+                  <>Queue: <span className="text-brand-accent font-bold">{totalUnsent}</span> failed/queued. Unattended: <span className="text-brand-accent font-bold">{stats.total - stats.attended}</span> students.</>
                 ) : (
-                  <>✨ All ticket emails sent successfully! (0 unsent/queued).</>
+                  <>✨ All sent. Unattended: <span className="text-brand-accent font-bold">{stats.total - stats.attended}</span> students.</>
                 )}
               </p>
             </div>
@@ -645,40 +647,38 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               </span>
             )}
             <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-center sm:justify-end">
-              {totalUnsent > 0 ? (
+              {!isDispatching ? (
                 <>
-                  {!isDispatching ? (
-                    <>
-                      <button
-                        onClick={startEmailDispatch}
-                        className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                      >
-                        ▶️ Start Sending
-                      </button>
-                      <button
-                        onClick={handleResetAllEmails}
-                        disabled={resetLoading}
-                        className="w-full sm:w-auto px-5 py-2.5 bg-brand-primary-dark hover:bg-brand-primary-light text-brand-accent border border-brand-accent/20 hover:border-brand-accent/60 font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
-                      >
-                        {resetLoading ? "Resetting..." : "🔄 Reset All"}
-                      </button>
-                    </>
-                  ) : (
+                  {totalUnsent > 0 && (
                     <button
-                      onClick={pauseEmailDispatch}
-                      className="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                      onClick={() => startEmailDispatch("failed")}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                     >
-                      ⏸️ Pause Sending
+                      ▶️ Dispatch Failed ({totalUnsent})
                     </button>
                   )}
+                  {stats.total - stats.attended > 0 && (
+                    <button
+                      onClick={() => startEmailDispatch("not_attended")}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                    >
+                      📧 Resend Unattended ({stats.total - stats.attended})
+                    </button>
+                  )}
+                  <button
+                    onClick={handleResetAllEmails}
+                    disabled={resetLoading}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-brand-primary-dark hover:bg-brand-primary-light text-brand-accent border border-brand-accent/20 hover:border-brand-accent/60 font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {resetLoading ? "Resetting..." : "🔄 Reset All"}
+                  </button>
                 </>
               ) : (
                 <button
-                  onClick={handleResetAllEmails}
-                  disabled={resetLoading}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  onClick={pauseEmailDispatch}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                 >
-                  {resetLoading ? "Resetting..." : "🔄 Reset All (Bulk Resend)"}
+                  ⏸️ Pause Sending
                 </button>
               )}
             </div>

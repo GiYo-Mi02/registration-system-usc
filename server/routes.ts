@@ -758,22 +758,46 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 });
 
 router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken, requireAdmin, async (req, res) => {
-  const { eventId } = req.body;
+  const { eventId, target } = req.body;
   if (!eventId) {
     return res.status(400).json({ success: false, message: "eventId is required" });
   }
 
   try {
-    const { data: failedStudents, error } = await supabase
-      .from("students")
-      .select("*")
-      .eq("event_id", eventId)
-      .eq("email_status", "failed");
+    let failedStudents = [];
 
-    if (error) throw error;
+    if (target === "not_attended") {
+      const { data: unattendedAttendance, error: attError } = await supabase
+        .from("attendance")
+        .select("student_id")
+        .eq("event_id", eventId)
+        .is("scanned_at", null);
+
+      if (attError) throw attError;
+
+      if (unattendedAttendance && unattendedAttendance.length > 0) {
+        const studentIds = unattendedAttendance.map(a => a.student_id);
+        const { data: studentsList, error: stdError } = await supabase
+          .from("students")
+          .select("*")
+          .in("id", studentIds);
+
+        if (stdError) throw stdError;
+        failedStudents = studentsList || [];
+      }
+    } else {
+      const { data: studentsList, error: stdError } = await supabase
+        .from("students")
+        .select("*")
+        .eq("event_id", eventId)
+        .eq("email_status", "failed");
+
+      if (stdError) throw stdError;
+      failedStudents = studentsList || [];
+    }
 
     if (!failedStudents || failedStudents.length === 0) {
-      return res.json({ success: true, count: 0, message: "No failed emails found." });
+      return res.json({ success: true, count: 0, message: "No matching students found to resend." });
     }
 
     const { data: eventInfo } = await supabase
