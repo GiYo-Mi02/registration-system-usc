@@ -40,6 +40,13 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
   const lastScannedTokenRef = useRef<string>("");
   const lastScannedTimestampRef = useRef<number>(0);
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isValidatingRef = useRef<boolean>(false);
+  const scanStateRef = useRef<"idle" | "valid" | "duplicate" | "fake">("idle");
+
+  const updateScanState = (state: "idle" | "valid" | "duplicate" | "fake") => {
+    setScanState(state);
+    scanStateRef.current = state;
+  };
 
   useEffect(() => {
     return () => {
@@ -136,6 +143,10 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
           }
         },
         (decodedText) => {
+          // Ignore frames if we are currently verifying a token or displaying a result
+          if (isValidatingRef.current || scanStateRef.current !== "idle") {
+            return;
+          }
           // Success callback - keep camera running, process scan with local cooldown block
           const now = Date.now();
           if (decodedText === lastScannedTokenRef.current && (now - lastScannedTimestampRef.current) < 3000) {
@@ -177,32 +188,57 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
   // Central Cryptographic verification router — calls Supabase RPC directly
   const handleVerifyToken = async (tokenStr: string) => {
+    if (isValidatingRef.current || scanStateRef.current !== "idle") {
+      return;
+    }
+    isValidatingRef.current = true;
+
     try {
       const scannedBy = auth.user?.id || "unknown";
       const data = await verifyScan(tokenStr, scannedBy, selectedEvent.id);
 
       if (data.status === "VALID") {
-        setScanState("valid");
+        updateScanState("valid");
         setScanResult(data);
+        // Auto-clear success scans after 2 seconds to make continuous scans extremely quick and smooth
+        if (cooldownTimerRef.current) {
+          clearTimeout(cooldownTimerRef.current);
+        }
+        cooldownTimerRef.current = setTimeout(() => {
+          handleResetScanState();
+        }, 2000);
       } else if (data.status === "ALREADY_USED") {
-        setScanState("duplicate");
+        updateScanState("duplicate");
         setScanResult(data);
+        // Auto-clear duplicate status card after 4 seconds
+        if (cooldownTimerRef.current) {
+          clearTimeout(cooldownTimerRef.current);
+        }
+        cooldownTimerRef.current = setTimeout(() => {
+          handleResetScanState();
+        }, 4000);
       } else {
-        setScanState("fake");
+        updateScanState("fake");
         setScanResult({ message: data.message || "Fake or forged QR signature detected." });
+        // Auto-clear invalid status card after 4 seconds
+        if (cooldownTimerRef.current) {
+          clearTimeout(cooldownTimerRef.current);
+        }
+        cooldownTimerRef.current = setTimeout(() => {
+          handleResetScanState();
+        }, 4000);
       }
-
-      // Start 30-second auto-clear timer
+    } catch (e: any) {
+      updateScanState("fake");
+      setScanResult({ message: "Network connection or signature validation failed." });
       if (cooldownTimerRef.current) {
         clearTimeout(cooldownTimerRef.current);
       }
       cooldownTimerRef.current = setTimeout(() => {
-        setScanState("idle");
-        setScanResult(null);
-      }, 30000);
-    } catch (e: any) {
-      setScanState("fake");
-      setScanResult({ message: "Network connection or signature validation failed." });
+        handleResetScanState();
+      }, 4000);
+    } finally {
+      isValidatingRef.current = false;
     }
   };
 
@@ -212,9 +248,10 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     if (cooldownTimerRef.current) {
       clearTimeout(cooldownTimerRef.current);
     }
-    setScanState("idle");
+    updateScanState("idle");
     setScanResult(null);
     lastScannedTokenRef.current = ""; // Reset block so it can be scanned again immediately
+    isValidatingRef.current = false;
   };
 
   return (
