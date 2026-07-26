@@ -114,11 +114,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const studentIds = (studentRecords || []).map(s => s.id);
 
         if (studentIds.length > 0) {
-          await supabase.from("email_log").delete().in("student_id", studentIds);
-          await supabase.from("attendance").delete().in("student_id", studentIds);
-          await supabase.from("qr_tokens").delete().in("student_id", studentIds);
-          const { error: delErr } = await supabase.from("students").delete().in("id", studentIds);
-          if (delErr) throw delErr;
+          const chunkSize = 100;
+          for (let i = 0; i < studentIds.length; i += chunkSize) {
+            const chunkIds = studentIds.slice(i, i + chunkSize);
+            await supabase.from("email_log").delete().in("student_id", chunkIds);
+            await supabase.from("attendance").delete().in("student_id", chunkIds);
+            await supabase.from("qr_tokens").delete().in("student_id", chunkIds);
+            const { error: delErr } = await supabase.from("students").delete().in("id", chunkIds);
+            if (delErr) throw delErr;
+          }
         }
 
         return res.status(200).json({ success: true, count: studentIds.length });

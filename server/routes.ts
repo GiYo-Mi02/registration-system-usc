@@ -13,7 +13,8 @@ import {
 import {
   escapeHTML,
   generateEmailTemplate,
-  sendEmail
+  sendEmail,
+  isEmailQuotaExceeded
 } from "./helpers";
 
 const router = express.Router();
@@ -608,13 +609,26 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
     });
 
     if (!skipEmails) {
-      try {
-        await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-        await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-      } catch (e: any) {
-        await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+      if (isEmailQuotaExceeded()) {
+        await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+      } else {
+        try {
+          await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+        } catch (e: any) {
+          const errMsg = e?.message || String(e);
+          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+          await supabase.from("students").update({
+            email_status: "failed",
+            email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+          }).eq("id", student.id);
+          await supabase.from("email_log").update({
+            status: "failed",
+            error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+          }).eq("student_id", student.id);
+        }
       }
     }
 
@@ -728,16 +742,27 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
       });
 
       if (!skipEmails) {
-        const emailPromise = sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl)
-          .then(async () => {
+        if (isEmailQuotaExceeded()) {
+          await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
+          await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+        } else {
+          try {
+            await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
             await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
             await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-          })
-          .catch(async (e) => {
-            await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
-          });
-        emailPromises.push(emailPromise);
+          } catch (e: any) {
+            const errMsg = e?.message || String(e);
+            const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+            await supabase.from("students").update({
+              email_status: "failed",
+              email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("id", student.id);
+            await supabase.from("email_log").update({
+              status: "failed",
+              error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("student_id", student.id);
+          }
+        }
       }
 
       insertedCount++;
@@ -746,13 +771,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
     }
   }
 
-  if (emailPromises.length > 0) {
-    Promise.allSettled(emailPromises).then(() => {
-      notifyClients("bulk_sync", {});
-    });
-  } else {
-    notifyClients("bulk_sync", {});
-  }
+  notifyClients("bulk_sync", {});
 
   return res.json({ success: true, insertedCount });
 });
@@ -777,13 +796,21 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
 
       if (unattendedAttendance && unattendedAttendance.length > 0) {
         const studentIds = unattendedAttendance.map(a => a.student_id);
-        const { data: studentsList, error: stdError } = await supabase
-          .from("students")
-          .select("*")
-          .in("id", studentIds);
+        const chunkedStudents: any[] = [];
+        const chunkSize = 100;
+        for (let i = 0; i < studentIds.length; i += chunkSize) {
+          const chunkIds = studentIds.slice(i, i + chunkSize);
+          const { data: studentsList, error: stdError } = await supabase
+            .from("students")
+            .select("*")
+            .in("id", chunkIds);
 
-        if (stdError) throw stdError;
-        failedStudents = studentsList || [];
+          if (stdError) throw stdError;
+          if (studentsList) {
+            chunkedStudents.push(...studentsList);
+          }
+        }
+        failedStudents = chunkedStudents;
       }
     } else {
       const { data: studentsList, error: stdError } = await supabase
@@ -812,14 +839,27 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
     const eventDesc = eventInfo?.description || "";
 
     const studentIds = failedStudents.map(s => s.id);
-    await supabase.from("students")
-      .update({ email_status: "failed", email_error: "queued" })
-      .in("id", studentIds);
+    const chunkSize = 100;
+    for (let i = 0; i < studentIds.length; i += chunkSize) {
+      const chunkIds = studentIds.slice(i, i + chunkSize);
+      await supabase.from("students")
+        .update({ email_status: "failed", email_error: "queued" })
+        .in("id", chunkIds);
+    }
 
-    const emailPromises: Promise<any>[] = [];
+    // Process background resend sequentially to honor rate limit and circuit breaker
+    (async () => {
+      let sentCount = 0;
 
-    for (const student of failedStudents) {
-      const emailPromise = (async () => {
+      for (const student of failedStudents) {
+        if (isEmailQuotaExceeded()) {
+          await supabase.from("students").update({
+            email_status: "failed",
+            email_error: "Daily user sending limit exceeded (550 5.4.5)"
+          }).eq("id", student.id);
+          continue;
+        }
+
         try {
           let { data: tokenRecord } = await supabase
             .from("qr_tokens")
@@ -844,6 +884,8 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
           const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
           const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
+          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+
           await supabase.from("email_log")
             .upsert({
               student_id: student.id,
@@ -855,24 +897,30 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
             }, { onConflict: "student_id" });
 
           await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-
-          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          sentCount++;
         } catch (err: any) {
-          console.error(`Failed to background resend email:`, err);
+          const errMsg = err?.message || String(err);
+          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+          console.error(`Failed to resend email for ${student.email}:`, errMsg);
           try {
-            await supabase.from("students").update({ email_status: "failed", email_error: err.message }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "failed", error_message: err.message }).eq("student_id", student.id);
+            await supabase.from("students").update({
+              email_status: "failed",
+              email_error: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("id", student.id);
+            await supabase.from("email_log").update({
+              status: "failed",
+              error_message: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("student_id", student.id);
           } catch {}
-        }
-      })();
-      emailPromises.push(emailPromise);
-    }
 
-    if (emailPromises.length > 0) {
-      Promise.allSettled(emailPromises).then(() => {
-        notifyClients("bulk_sync", {});
-      });
-    }
+          if (isQuota) {
+            console.error(`[BULK RESEND HALTED] Gmail sending limit reached after sending ${sentCount} emails.`);
+          }
+        }
+      }
+
+      notifyClients("bulk_sync", {});
+    })();
 
     return res.json({ success: true, count: failedStudents.length });
   } catch (err: any) {
@@ -919,6 +967,9 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
     const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
     const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
+    // Send email via Nodemailer SMTP
+    await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+
     // Update Email Log
     await supabase.from("email_log")
       .upsert({
@@ -931,9 +982,6 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
       }, { onConflict: "student_id" });
 
     await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", studentId);
-
-    // Send email via Nodemailer SMTP
-    await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
 
     notifyClients("student_updated", {
       student: {
@@ -973,36 +1021,55 @@ router.post("/api/reset-emails", authenticateToken, requireAdmin, async (req, re
   }
 
   try {
-    let query = supabase
-      .from("students")
-      .select("id")
-      .eq("event_id", eventId);
+    let studentIds: string[] = [];
 
     if (Array.isArray(emails) && emails.length > 0) {
       const normalizedEmails = emails.map(e => e.trim().toLowerCase());
-      query = query.in("email", normalizedEmails);
+      const chunkedIds: string[] = [];
+      const chunkSize = 100;
+      for (let i = 0; i < normalizedEmails.length; i += chunkSize) {
+        const chunkEmails = normalizedEmails.slice(i, i + chunkSize);
+        const { data: students, error: fetchErr } = await supabase
+          .from("students")
+          .select("id")
+          .eq("event_id", eventId)
+          .in("email", chunkEmails);
+
+        if (fetchErr) throw fetchErr;
+        if (students) {
+          chunkedIds.push(...students.map(s => s.id));
+        }
+      }
+      studentIds = chunkedIds;
+    } else {
+      const { data: students, error: fetchErr } = await supabase
+        .from("students")
+        .select("id")
+        .eq("event_id", eventId);
+
+      if (fetchErr) throw fetchErr;
+      studentIds = (students || []).map(s => s.id);
     }
 
-    const { data: students, error: fetchErr } = await query;
-
-    if (fetchErr) throw fetchErr;
-
-    const studentIds = (students || []).map(s => s.id);
-
     if (studentIds.length > 0) {
-      const { error: updateErr } = await supabase
-        .from("students")
-        .update({ email_status: "failed", email_error: null })
-        .in("id", studentIds);
+      const chunkSize = 100;
+      for (let i = 0; i < studentIds.length; i += chunkSize) {
+        const chunkIds = studentIds.slice(i, i + chunkSize);
+        
+        const { error: updateErr } = await supabase
+          .from("students")
+          .update({ email_status: "failed", email_error: null })
+          .in("id", chunkIds);
 
-      if (updateErr) throw updateErr;
+        if (updateErr) throw updateErr;
 
-      const { error: logErr } = await supabase
-        .from("email_log")
-        .update({ status: "failed", error_message: "queued" })
-        .in("student_id", studentIds);
+        const { error: logErr } = await supabase
+          .from("email_log")
+          .update({ status: "failed", error_message: "queued" })
+          .in("student_id", chunkIds);
 
-      if (logErr) throw logErr;
+        if (logErr) throw logErr;
+      }
     }
 
     notifyClients("bulk_update", { eventId });
@@ -1034,11 +1101,15 @@ router.delete("/api/students", authenticateToken, requireAdmin, async (req, res)
       const studentIds = (studentRecords || []).map(s => s.id);
 
       if (studentIds.length > 0) {
-        await supabase.from("email_log").delete().in("student_id", studentIds);
-        await supabase.from("attendance").delete().in("student_id", studentIds);
-        await supabase.from("qr_tokens").delete().in("student_id", studentIds);
-        const { error: delErr } = await supabase.from("students").delete().in("id", studentIds);
-        if (delErr) throw delErr;
+        const chunkSize = 100;
+        for (let i = 0; i < studentIds.length; i += chunkSize) {
+          const chunkIds = studentIds.slice(i, i + chunkSize);
+          await supabase.from("email_log").delete().in("student_id", chunkIds);
+          await supabase.from("attendance").delete().in("student_id", chunkIds);
+          await supabase.from("qr_tokens").delete().in("student_id", chunkIds);
+          const { error: delErr } = await supabase.from("students").delete().in("id", chunkIds);
+          if (delErr) throw delErr;
+        }
       }
 
       notifyClients("bulk_delete", { eventId });

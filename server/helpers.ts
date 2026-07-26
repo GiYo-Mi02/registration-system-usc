@@ -248,11 +248,33 @@ export function generateEmailTemplate(
   `;
 }
 
+let quotaExceededFlag = false;
+let quotaExceededMessage = "";
+
+export function isEmailQuotaExceeded(): boolean {
+  return quotaExceededFlag;
+}
+
+export function getEmailQuotaMessage(): string {
+  return quotaExceededMessage;
+}
+
+export function resetEmailQuota(): void {
+  quotaExceededFlag = false;
+  quotaExceededMessage = "";
+}
+
 // Mail Dispatcher
 export async function sendEmail(to: string, subject: string, htmlContent: string, qrDataUrl?: string) {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     console.log(`[SMTP SIMULATOR] Mock email sent to: ${to} (SMTP credentials missing in environment variables)`);
     return { success: true, simulated: true };
+  }
+
+  if (quotaExceededFlag) {
+    const msg = quotaExceededMessage || "Gmail Daily Sending Limit Exceeded (550 5.4.5). Email dispatches are currently paused.";
+    console.warn(`[SMTP CIRCUIT BREAKER] Email sending skipped for ${to} — ${msg}`);
+    throw new Error(msg);
   }
 
   try {
@@ -283,7 +305,25 @@ export async function sendEmail(to: string, subject: string, htmlContent: string
     console.log(`[SMTP] Email successfully sent to ${to} (MessageId: ${info.messageId})`);
     return { success: true, simulated: false };
   } catch (err: any) {
-    console.error(`[SMTP ERROR] Failed to send email to ${to}:`, err);
+    const errMessage = err?.message || String(err);
+    const responseText = String(err?.response || "");
+    const combinedError = `${errMessage} ${responseText}`;
+
+    // Detect Gmail 550 5.4.5 Daily user sending limit exceeded or similar quota errors
+    if (
+      err?.responseCode === 550 ||
+      combinedError.includes("550") ||
+      combinedError.includes("5.4.5") ||
+      combinedError.toLowerCase().includes("daily user sending limit exceeded") ||
+      combinedError.toLowerCase().includes("sending limits")
+    ) {
+      quotaExceededFlag = true;
+      quotaExceededMessage = "Gmail 550 5.4.5: Daily user sending limit exceeded. Email sending paused.";
+      console.error(`[SMTP CIRCUIT BREAKER TRIGGERED] Gmail Daily Sending Limit Exceeded (550 5.4.5). Halting subsequent email dispatch attempts.`);
+      throw new Error("Gmail Daily Sending Limit Exceeded (550 5.4.5). Email sending paused.");
+    }
+
+    console.error(`[SMTP ERROR] Failed to send email to ${to}:`, errMessage);
     throw err;
   }
 }

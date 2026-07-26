@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-import { generateEmailTemplate, sendEmail } from "../server/helpers";
+import { generateEmailTemplate, sendEmail, isEmailQuotaExceeded } from "../server/helpers";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -64,13 +64,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (unattendedAttendance && unattendedAttendance.length > 0) {
         const studentIds = unattendedAttendance.map(a => a.student_id);
-        const { data: studentsList, error: stdError } = await supabase
-          .from("students")
-          .select("*")
-          .in("id", studentIds);
+        const chunkedStudents: any[] = [];
+        const chunkSize = 100;
+        for (let i = 0; i < studentIds.length; i += chunkSize) {
+          const chunkIds = studentIds.slice(i, i + chunkSize);
+          const { data: studentsList, error: stdError } = await supabase
+            .from("students")
+            .select("*")
+            .in("id", chunkIds);
 
-        if (stdError) throw stdError;
-        failedStudents = studentsList || [];
+          if (stdError) throw stdError;
+          if (studentsList) {
+            chunkedStudents.push(...studentsList);
+          }
+        }
+        failedStudents = chunkedStudents;
       }
     } else {
       const { data: studentsList, error: stdError } = await supabase
@@ -100,14 +108,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Set all failed students' statuses to "queued" in the DB first so UI shows they are in queue
     const studentIds = failedStudents.map(s => s.id);
-    await supabase.from("students")
-      .update({ email_status: "failed", email_error: "queued" })
-      .in("id", studentIds);
+    const chunkSize = 100;
+    for (let i = 0; i < studentIds.length; i += chunkSize) {
+      const chunkIds = studentIds.slice(i, i + chunkSize);
+      await supabase.from("students")
+        .update({ email_status: "failed", email_error: "queued" })
+        .in("id", chunkIds);
+    }
 
-    const emailPromises: Promise<any>[] = [];
+    // Process background resend sequentially to honor rate limit and circuit breaker
+    (async () => {
+      let sentCount = 0;
 
-    for (const student of failedStudents) {
-      const emailPromise = (async () => {
+      for (const student of failedStudents) {
+        if (isEmailQuotaExceeded()) {
+          await supabase.from("students").update({
+            email_status: "failed",
+            email_error: "Daily user sending limit exceeded (550 5.4.5)"
+          }).eq("id", student.id);
+          continue;
+        }
+
         try {
           let { data: tokenRecord } = await supabase
             .from("qr_tokens")
@@ -132,6 +153,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
           const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
+          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+
           await supabase.from("email_log")
             .upsert({
               student_id: student.id,
@@ -143,22 +166,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }, { onConflict: "student_id" });
 
           await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-
-          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          sentCount++;
         } catch (err: any) {
-          console.error(`Failed to background resend email:`, err);
+          const errMsg = err?.message || String(err);
+          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+          console.error(`Failed to resend email for ${student.email}:`, errMsg);
           try {
-            await supabase.from("students").update({ email_status: "failed", email_error: err.message }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "failed", error_message: err.message }).eq("student_id", student.id);
+            await supabase.from("students").update({
+              email_status: "failed",
+              email_error: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("id", student.id);
+            await supabase.from("email_log").update({
+              status: "failed",
+              error_message: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
+            }).eq("student_id", student.id);
           } catch {}
-        }
-      })();
-      emailPromises.push(emailPromise);
-    }
 
-    if (emailPromises.length > 0) {
-      Promise.allSettled(emailPromises);
-    }
+          if (isQuota) {
+            console.error(`[BULK RESEND HALTED] Gmail sending limit reached after sending ${sentCount} emails.`);
+          }
+        }
+      }
+    })();
 
     return res.status(200).json({ success: true, count: failedStudents.length });
   } catch (err: any) {

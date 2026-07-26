@@ -102,11 +102,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select("id")
         .eq("event_id", eventId);
 
-      if (students && students.length > 0) {
+       if (students && students.length > 0) {
         const studentIds = students.map(s => s.id);
-        await supabase.from("email_log").delete().in("student_id", studentIds);
-        await supabase.from("attendance").delete().in("student_id", studentIds);
-        await supabase.from("qr_tokens").delete().in("student_id", studentIds);
+        const chunkSize = 100;
+        for (let i = 0; i < studentIds.length; i += chunkSize) {
+          const chunkIds = studentIds.slice(i, i + chunkSize);
+          await supabase.from("email_log").delete().in("student_id", chunkIds);
+          await supabase.from("attendance").delete().in("student_id", chunkIds);
+          await supabase.from("qr_tokens").delete().in("student_id", chunkIds);
+        }
         await supabase.from("students").delete().eq("event_id", eventId);
       }
 

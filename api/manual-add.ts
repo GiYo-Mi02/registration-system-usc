@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import QRCode from "qrcode";
 import { createClient } from "@supabase/supabase-js";
-import { generateEmailTemplate, sendEmail } from "../server/helpers";
+import { generateEmailTemplate, sendEmail, isEmailQuotaExceeded } from "../server/helpers";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -128,13 +128,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (!skipEmails) {
-      try {
-        await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-        await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
-      } catch (e: any) {
-        await supabase.from("students").update({ email_status: "failed", email_error: e.message }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "failed", error_message: e.message }).eq("student_id", student.id);
+      if (isEmailQuotaExceeded()) {
+        await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
+        await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+      } else {
+        try {
+          await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
+          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+        } catch (e: any) {
+          const errMsg = e?.message || String(e);
+          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+          await supabase.from("students").update({
+            email_status: "failed",
+            email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+          }).eq("id", student.id);
+          await supabase.from("email_log").update({
+            status: "failed",
+            error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
+          }).eq("student_id", student.id);
+        }
       }
     }
 

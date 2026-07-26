@@ -443,9 +443,11 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       const res = await resendTicket(auth.token || "", studentId);
       if (res.success) {
         onRefreshStudents();
+      } else {
+        alert(`Resend failed: ${res.message || "Unknown error"}`);
       }
-    } catch (e) {
-      alert("Resend failed");
+    } catch (e: any) {
+      alert(`Resend failed: ${e.message || "Network error"}`);
     } finally {
       setActionLoadingId(null);
     }

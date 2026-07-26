@@ -84,7 +84,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
     const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
 
-    // Update Email Log
+    // Send email via Nodemailer SMTP
+    await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+
+    // Update Email Log & Student Status
     await supabase.from("email_log")
       .upsert({
         student_id: studentId,
@@ -97,12 +100,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", studentId);
 
-    // Send email via Nodemailer SMTP
-    await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
-
     return res.status(200).json({ success: true });
   } catch (err: any) {
-    console.error("Resend ticket error:", err);
+    console.error("Resend ticket error:", err?.message || err);
     // Log failure in Supabase so user gets feedback
     try {
       await supabase.from("students").update({ email_status: "failed", email_error: err.message }).eq("id", studentId);

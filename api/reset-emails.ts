@@ -47,38 +47,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    let query = supabase
-      .from("students")
-      .select("id")
-      .eq("event_id", eventId);
+    let studentIds: string[] = [];
 
     if (Array.isArray(emails) && emails.length > 0) {
       const normalizedEmails = emails.map(e => e.trim().toLowerCase());
-      query = query.in("email", normalizedEmails);
+      const chunkedIds: string[] = [];
+      const chunkSize = 100;
+      for (let i = 0; i < normalizedEmails.length; i += chunkSize) {
+        const chunkEmails = normalizedEmails.slice(i, i + chunkSize);
+        const { data: students, error: fetchErr } = await supabase
+          .from("students")
+          .select("id")
+          .eq("event_id", eventId)
+          .in("email", chunkEmails);
+
+        if (fetchErr) throw fetchErr;
+        if (students) {
+          chunkedIds.push(...students.map(s => s.id));
+        }
+      }
+      studentIds = chunkedIds;
+    } else {
+      const { data: students, error: fetchErr } = await supabase
+        .from("students")
+        .select("id")
+        .eq("event_id", eventId);
+
+      if (fetchErr) throw fetchErr;
+      studentIds = (students || []).map(s => s.id);
     }
 
-    const { data: students, error: fetchErr } = await query;
-
-    if (fetchErr) throw fetchErr;
-
-    const studentIds = (students || []).map(s => s.id);
-
     if (studentIds.length > 0) {
-      // Update students table
-      const { error: updateErr } = await supabase
-        .from("students")
-        .update({ email_status: "failed", email_error: null })
-        .in("id", studentIds);
+      const chunkSize = 100;
+      for (let i = 0; i < studentIds.length; i += chunkSize) {
+        const chunkIds = studentIds.slice(i, i + chunkSize);
 
-      if (updateErr) throw updateErr;
+        // Update students table
+        const { error: updateErr } = await supabase
+          .from("students")
+          .update({ email_status: "failed", email_error: null })
+          .in("id", chunkIds);
 
-      // Update email logs
-      const { error: logErr } = await supabase
-        .from("email_log")
-        .update({ status: "failed", error_message: "queued" })
-        .in("student_id", studentIds);
+        if (updateErr) throw updateErr;
 
-      if (logErr) throw logErr;
+        // Update email logs
+        const { error: logErr } = await supabase
+          .from("email_log")
+          .update({ status: "failed", error_message: "queued" })
+          .in("student_id", chunkIds);
+
+        if (logErr) throw logErr;
+      }
     }
 
     return res.status(200).json({ success: true, count: studentIds.length });
