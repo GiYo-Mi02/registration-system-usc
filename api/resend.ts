@@ -5,6 +5,7 @@ import {
   failedDeliveryAttemptArgs,
   generateEmailTemplate,
   recordEmailDeliveryAttempt,
+  resetEmailQuota,
   sendEmail,
   successfulDeliveryAttemptArgs
 } from "../server/helpers";
@@ -54,6 +55,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!studentId) {
     return res.status(400).json({ success: false, message: "studentId parameter is required" });
   }
+
+  resetEmailQuota();
 
   let emailHtml = "";
   let qrDataUrl = "";

@@ -5,8 +5,10 @@ import { createClient } from "@supabase/supabase-js";
 import {
   failedDeliveryAttemptArgs,
   generateEmailTemplate,
+  isEmailQuotaError,
   isEmailQuotaExceeded,
   recordEmailDeliveryAttempt,
+  resetEmailQuota,
   sendEmail,
   successfulDeliveryAttemptArgs
 } from "../server/helpers";
@@ -63,6 +65,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (studentIds.length > 5 || studentIds.some(id => typeof id !== "string")) {
     return res.status(400).json({ success: false, message: "Each delivery batch must contain between 1 and 5 valid student IDs." });
   }
+
+  // Vercel can reuse a warm function instance. Start each explicit admin
+  // retry with a fresh breaker; a genuine quota response will relatch it.
+  resetEmailQuota();
 
   try {
     const uniqueStudentIds = Array.from(new Set(studentIds));
@@ -164,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       } catch (err: any) {
         const errMsg = err?.message || String(err);
-        const hitQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+        const hitQuota = isEmailQuotaExceeded() || isEmailQuotaError(err);
         const deliveryError = hitQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg;
         console.error(`Failed to submit email for ${student.email}:`, deliveryError);
 

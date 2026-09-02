@@ -14,8 +14,10 @@ import {
   escapeHTML,
   failedDeliveryAttemptArgs,
   generateEmailTemplate,
+  isEmailQuotaError,
   isEmailQuotaExceeded,
   recordEmailDeliveryAttempt,
+  resetEmailQuota,
   sendEmail,
   successfulDeliveryAttemptArgs
 } from "./helpers";
@@ -595,6 +597,8 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
     return res.status(400).json({ success: false, message: "Name, email, college, program, year, section, and event are required." });
   }
 
+  if (!skipEmails) resetEmailQuota();
+
   try {
     const { data: existing } = await supabase
       .from("students")
@@ -703,7 +707,7 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
           }).eq("id", student.id);
         } catch (e: any) {
           const errMsg = e?.message || String(e);
-          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+          const isQuota = isEmailQuotaExceeded() || isEmailQuotaError(e);
           await supabase.from("students").update({
             email_status: "failed",
             email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
@@ -750,6 +754,8 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
   if (!skipEmails && students.length > 5) {
     return res.status(400).json({ success: false, message: "Send-enabled imports are limited to 5 students per request." });
   }
+
+  if (!skipEmails) resetEmailQuota();
 
   // Fetch Event Settings
   const { data: eventInfo } = await supabase
@@ -852,7 +858,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
                   .eq("id", existing.id);
               } catch (e: any) {
                 const errMsg = e?.message || String(e);
-                const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+                const isQuota = isEmailQuotaExceeded() || isEmailQuotaError(e);
                 const deliveryError = isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg;
                 await supabase.from("students")
                   .update({ email_status: "failed", email_error: deliveryError })
@@ -951,7 +957,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
             }).eq("id", student.id);
           } catch (e: any) {
             const errMsg = e?.message || String(e);
-            const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+            const isQuota = isEmailQuotaExceeded() || isEmailQuotaError(e);
             await supabase.from("students").update({
               email_status: "failed",
               email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
@@ -983,6 +989,8 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
   if (studentIds.length > 5 || studentIds.some(id => typeof id !== "string")) {
     return res.status(400).json({ success: false, message: "Each delivery batch must contain between 1 and 5 valid student IDs." });
   }
+
+  resetEmailQuota();
 
   try {
     const uniqueStudentIds = Array.from(new Set(studentIds)) as string[];
@@ -1079,7 +1087,7 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
         });
       } catch (err: any) {
         const errMsg = err?.message || String(err);
-        const hitQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+        const hitQuota = isEmailQuotaExceeded() || isEmailQuotaError(err);
         const deliveryError = hitQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg;
         if (emailHtml && qrDataUrl) {
           await recordEmailDeliveryAttempt(
@@ -1122,6 +1130,7 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
 
 router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requireAdmin, async (req, res) => {
   const studentId = req.params.id || (req.query.studentId as string) || req.body.studentId;
+  resetEmailQuota();
   let emailHtml = "";
   let qrDataUrl = "";
 

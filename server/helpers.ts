@@ -244,6 +244,22 @@ export function resetEmailQuota(): void {
   quotaExceededMessage = "";
 }
 
+export function isEmailQuotaError(error: unknown): boolean {
+  const smtpError = error as {
+    message?: unknown;
+    response?: unknown;
+  };
+  const combinedError = `${String(smtpError?.message || error || "")} ${String(smtpError?.response || "")}`.toLowerCase();
+
+  return (
+    combinedError.includes("5.4.5") ||
+    combinedError.includes("daily user sending limit exceeded") ||
+    combinedError.includes("daily user sending quota exceeded") ||
+    combinedError.includes("daily smtp relay sending limit exceeded") ||
+    combinedError.includes("you have reached a limit for sending mail")
+  );
+}
+
 export function prepareEmailForDelivery(htmlContent: string, qrDataUrl?: string) {
   const attachments = [];
   let formattedHtml = htmlContent;
@@ -481,17 +497,10 @@ export async function sendEmail(to: string, subject: string, htmlContent: string
     };
   } catch (err: any) {
     const errMessage = err?.message || String(err);
-    const responseText = String(err?.response || "");
-    const combinedError = `${errMessage} ${responseText}`;
 
-    // Detect Gmail 550 5.4.5 Daily user sending limit exceeded or similar quota errors
-    if (
-      err?.responseCode === 550 ||
-      combinedError.includes("550") ||
-      combinedError.includes("5.4.5") ||
-      combinedError.toLowerCase().includes("daily user sending limit exceeded") ||
-      combinedError.toLowerCase().includes("sending limits")
-    ) {
+    // A generic SMTP 550 can be a bad recipient. Only halt on a real
+    // provider quota response so one invalid address cannot stop the batch.
+    if (isEmailQuotaError(err)) {
       quotaExceededFlag = true;
       quotaExceededMessage = "Gmail 550 5.4.5: Daily user sending limit exceeded. Email sending paused.";
       console.error(`[SMTP CIRCUIT BREAKER TRIGGERED] Gmail Daily Sending Limit Exceeded (550 5.4.5). Halting subsequent email dispatch attempts.`);

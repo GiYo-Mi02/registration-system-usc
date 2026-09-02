@@ -5,8 +5,10 @@ import { createClient } from "@supabase/supabase-js";
 import {
   failedDeliveryAttemptArgs,
   generateEmailTemplate,
+  isEmailQuotaError,
   isEmailQuotaExceeded,
   recordEmailDeliveryAttempt,
+  resetEmailQuota,
   sendEmail,
   successfulDeliveryAttemptArgs
 } from "../server/helpers";
@@ -62,6 +64,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!skipEmails && students.length > 5) {
     return res.status(400).json({ success: false, message: "Send-enabled imports are limited to 5 students per request." });
   }
+
+  if (!skipEmails) resetEmailQuota();
 
   try {
     // Fetch Event Settings
@@ -165,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     .eq("id", existing.id);
                 } catch (e: any) {
                   const errMsg = e?.message || String(e);
-                  const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+                  const isQuota = isEmailQuotaExceeded() || isEmailQuotaError(e);
                   const deliveryError = isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg;
                   await supabase.from("students")
                     .update({ email_status: "failed", email_error: deliveryError })
@@ -266,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }).eq("id", student.id);
             } catch (e: any) {
               const errMsg = e?.message || String(e);
-              const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+              const isQuota = isEmailQuotaExceeded() || isEmailQuotaError(e);
               await supabase.from("students").update({
                 email_status: "failed",
                 email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
