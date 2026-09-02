@@ -440,7 +440,7 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
       .order("imported_at", { ascending: false });
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,college.ilike.%${search}%,program.ilike.%${search}%,section.ilike.%${search}%`);
+      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,college.ilike.%${search}%,program.ilike.%${search}%,year.ilike.%${search}%,section.ilike.%${search}%`);
     }
 
     if (collegeFilter) {
@@ -469,6 +469,7 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
         email: s.email,
         college: s.college,
         program: s.program,
+        year: s.year,
         section: s.section,
         form_response_id: s.form_response_id,
         imported_at: s.imported_at,
@@ -572,15 +573,16 @@ router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
 });
 
 router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, requireAdmin, async (req, res) => {
-  const { full_name, email, college, program, section, eventId, skipEmails } = req.body;
+  const { full_name, email, college, program, year, section, eventId, skipEmails } = req.body;
   const trimmedName = String(full_name || "").trim();
   const trimmedEmail = String(email || "").trim();
   const trimmedCollege = String(college || "").trim();
   const trimmedProgram = String(program || "").trim();
+  const trimmedYear = String(year || "").trim();
   const trimmedSection = String(section || "").trim();
 
-  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedSection || !eventId) {
-    return res.status(400).json({ success: false, message: "Name, email, college, program, section, and event are required." });
+  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedYear || !trimmedSection || !eventId) {
+    return res.status(400).json({ success: false, message: "Name, email, college, program, year, section, and event are required." });
   }
 
   try {
@@ -604,6 +606,7 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
         email: trimmedEmail,
         college: trimmedCollege,
         program: trimmedProgram,
+        year: trimmedYear,
         section: trimmedSection,
         form_response_id: formResponseId,
         email_status: "failed",
@@ -657,6 +660,7 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
       qrDataUrl,
       eventDesc,
       trimmedProgram,
+      trimmedYear,
       trimmedSection
     );
 
@@ -757,8 +761,9 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
     const trimmedEmail = String(s.email || "").trim();
     const college = String(s.college || "").trim();
     const program = String(s.program || "").trim();
+    const year = String(s.year || "").trim();
     const section = String(s.section || "").trim();
-    if (!fullName || !trimmedEmail || !college || !program || !section) continue;
+    if (!fullName || !trimmedEmail || !college || !program || !year || !section) continue;
 
     try {
       const { data: existing } = await supabase
@@ -776,6 +781,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
             email: trimmedEmail,
             college,
             program,
+            year,
             section
           })
           .eq("id", existing.id);
@@ -798,6 +804,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
             existingEmailLog.qr_data_url,
             eventDesc,
             program,
+            year,
             section
           );
           await supabase
@@ -862,6 +869,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
           email: trimmedEmail,
           college,
           program,
+          year,
           section,
           form_response_id: formResponseId,
           email_status: "failed",
@@ -900,6 +908,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
         qrDataUrl,
         eventDesc,
         program,
+        year,
         section
       );
 
@@ -1038,6 +1047,7 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
           qrDataUrl,
           eventDesc,
           student.program,
+          student.year,
           student.section
         );
 
@@ -1147,6 +1157,7 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
       qrDataUrl,
       eventDesc,
       student.program,
+      student.year,
       student.section
     );
 
@@ -1415,6 +1426,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
           email: scanResult.student_email,
           college: scanResult.student_college,
           program: scanResult.student_program,
+          year: scanResult.student_year,
           section: scanResult.student_section
         },
         scanned_at: scanResult.scanned_at,
@@ -1429,6 +1441,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
           email: scanResult.student_email,
           college: scanResult.student_college,
           program: scanResult.student_program,
+          year: scanResult.student_year,
           section: scanResult.student_section
         },
         scanned_at: scanResult.scanned_at,
@@ -1462,7 +1475,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
     const { data: scanners } = await supabase.from("committee_users").select("id, committee_name");
     const scannerMap = new Map(scanners?.map(s => [s.id, s.committee_name]) || []);
 
-    let csv = "Name,Email,College,Program,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
 
     for (const student of (students || [])) {
       const att = Array.isArray(student.attendance) ? student.attendance[0] : student.attendance;
@@ -1481,6 +1494,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
       const escapedEmail = student.email.replace(/"/g, '""');
       const escapedCollege = student.college.replace(/"/g, '""');
       const escapedProgram = (student.program || "").replace(/"/g, '""');
+      const escapedYear = (student.year || "").replace(/"/g, '""');
       const escapedSection = (student.section || "").replace(/"/g, '""');
       const deliveryStatus = emailLog?.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
       const escapedMessageId = (emailLog?.provider_message_id || "").replace(/"/g, '""');
@@ -1488,7 +1502,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
       const lastAttempt = emailLog?.last_attempt_at ? new Date(emailLog.last_attempt_at).toISOString() : "";
       const escapedScanner = scannerName.replace(/"/g, '""');
 
-      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");

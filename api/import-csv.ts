@@ -84,8 +84,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const trimmedEmail = String(s.email || "").trim();
       const college = String(s.college || "").trim();
       const program = String(s.program || "").trim();
+      const year = String(s.year || "").trim();
       const section = String(s.section || "").trim();
-      if (!fullName || !trimmedEmail || !college || !program || !section) continue;
+      if (!fullName || !trimmedEmail || !college || !program || !year || !section) continue;
 
       try {
         const { data: existing } = await supabase
@@ -103,6 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               email: trimmedEmail,
               college,
               program,
+              year,
               section
             })
             .eq("id", existing.id);
@@ -125,6 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               existingEmailLog.qr_data_url,
               eventDesc,
               program,
+              year,
               section
             );
             await supabase
@@ -189,6 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             email: trimmedEmail,
             college,
             program,
+            year,
             section,
             form_response_id: formResponseId,
             email_status: "failed",
@@ -227,6 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           qrDataUrl,
           eventDesc,
           program,
+          year,
           section
         );
 

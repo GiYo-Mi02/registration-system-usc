@@ -1,4 +1,4 @@
-Name,Email,College,Program,Section
-Sample Student One,student.one@example.invalid,College of Computing and Information Sciences,BS Computer Science,3A
-Sample Student Two,student.two@example.invalid,College of Computing and Information Sciences,BS Information Technology,3B
-Sample Student Three,student.three@example.invalid,College of Computing and Information Sciences,BS Information Systems,2A
+Name,Email,College,Program,Year,Section
+Sample Student One,student.one@example.invalid,College of Computing and Information Sciences,BS Computer Science,3rd Year,3A
+Sample Student Two,student.two@example.invalid,College of Computing and Information Sciences,BS Information Technology,3rd Year,3B
+Sample Student Three,student.three@example.invalid,College of Computing and Information Sciences,BS Information Systems,2nd Year,2A

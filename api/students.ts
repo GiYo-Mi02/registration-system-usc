@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: students, error: stdErr } = await supabase
         .from("students")
         .select(`
-          id, full_name, email, college, program, section, form_response_id, imported_at, email_status, email_error,
+          id, full_name, email, college, program, year, section, form_response_id, imported_at, email_status, email_error,
           attendance(scanned_at, scanned_by),
           email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)
         `)
@@ -83,6 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           email: s.email,
           college: s.college,
           program: s.program,
+          year: s.year,
           section: s.section,
           form_response_id: s.form_response_id,
           imported_at: s.imported_at,

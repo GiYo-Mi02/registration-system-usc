@@ -87,6 +87,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const [newEmail, setNewEmail] = useState("");
   const [newCollege, setNewCollege] = useState("");
   const [newProgram, setNewProgram] = useState("");
+  const [newYear, setNewYear] = useState("");
   const [newSection, setNewSection] = useState("");
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -136,6 +137,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       s.email.toLowerCase().includes(q) || 
       s.college.toLowerCase().includes(q) ||
       (s.program || "").toLowerCase().includes(q) ||
+      (s.year || "").toLowerCase().includes(q) ||
       (s.section || "").toLowerCase().includes(q)
     );
   }
@@ -191,7 +193,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   // 1. Manual Add Form submit
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newEmail.trim() || !newCollege.trim() || !newProgram.trim() || !newSection.trim()) {
+    if (!newName.trim() || !newEmail.trim() || !newCollege.trim() || !newProgram.trim() || !newYear.trim() || !newSection.trim()) {
       setAddError("Please fill out all registration fields.");
       return;
     }
@@ -205,6 +207,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         email: newEmail,
         college: newCollege,
         program: newProgram,
+        year: newYear,
         section: newSection,
         eventId: selectedEvent.id,
         skipEmails: !sendEmailsCheckbox
@@ -219,6 +222,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       setNewEmail("");
       setNewCollege("");
       setNewProgram("");
+      setNewYear("");
       setNewSection("");
       setShowAddForm(false);
       onRefreshStudents();
@@ -240,14 +244,14 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       if (!text) return;
 
       const lines = text.split(/\r?\n/);
-      const parsedStudents: { full_name: string; email: string; college: string; program: string; section: string }[] = [];
-      const expectedHeaders = ["name", "email", "college", "program", "section"];
+      const parsedStudents: { full_name: string; email: string; college: string; program: string; year: string; section: string }[] = [];
+      const expectedHeaders = ["name", "email", "college", "program", "year", "section"];
       const actualHeaders = parseCSVLine((lines[0] || "").replace(/^\uFEFF/, ""))
         .slice(0, expectedHeaders.length)
         .map(header => header.trim().toLowerCase());
 
       if (expectedHeaders.some((header, index) => actualHeaders[index] !== header)) {
-        alert("Invalid CSV header. The first five columns must be: Name, Email, College, Program, Section.");
+        alert("Invalid CSV header. The first six columns must be: Name, Email, College, Program, Year, Section.");
         e.target.value = "";
         return;
       }
@@ -258,20 +262,21 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
         const fields = parseCSVLine(line);
 
-        if (fields.length >= 5) {
+        if (fields.length >= 6) {
           const full_name = fields[0];
           const email = fields[1];
           const college = fields[2];
           const program = fields[3];
-          const section = fields[4];
-          if (full_name && email && college && program && section) {
-            parsedStudents.push({ full_name, email, college, program, section });
+          const year = fields[4];
+          const section = fields[5];
+          if (full_name && email && college && program && year && section) {
+            parsedStudents.push({ full_name, email, college, program, year, section });
           }
         }
       }
 
       if (parsedStudents.length === 0) {
-        alert("No valid rows found. Use the columns: Name, Email, College, Program, Section.");
+        alert("No valid rows found. Use the columns: Name, Email, College, Program, Year, Section.");
         return;
       }
 
@@ -332,12 +337,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     }
 
     const lines = bulkPasteText.split(/\r?\n/);
-    const parsedStudents: { full_name: string; email: string; college: string; program: string; section: string }[] = [];
+    const parsedStudents: { full_name: string; email: string; college: string; program: string; year: string; section: string }[] = [];
 
     // Detect if the first line contains the expected student CSV headers.
     let startIndex = 0;
     const firstLine = lines[0].toLowerCase().trim();
-    if (firstLine.includes("name") || firstLine.includes("email") || firstLine.includes("college") || firstLine.includes("program") || firstLine.includes("section")) {
+    if (firstLine.includes("name") || firstLine.includes("email") || firstLine.includes("college") || firstLine.includes("program") || firstLine.includes("year") || firstLine.includes("section")) {
       startIndex = 1; // Skip header line
     }
 
@@ -347,20 +352,21 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
       const fields = parseCSVLine(line);
 
-      if (fields.length >= 5) {
+      if (fields.length >= 6) {
         const full_name = fields[0];
         const email = fields[1];
         const college = fields[2];
         const program = fields[3];
-        const section = fields[4];
-        if (full_name && email && college && program && section) {
-          parsedStudents.push({ full_name, email, college, program, section });
+        const year = fields[4];
+        const section = fields[5];
+        if (full_name && email && college && program && year && section) {
+          parsedStudents.push({ full_name, email, college, program, year, section });
         }
       }
     }
 
     if (parsedStudents.length === 0) {
-      setBulkPasteError("No valid rows found. Use: name,email,college,program,section");
+      setBulkPasteError("No valid rows found. Use: name,email,college,program,year,section");
       return;
     }
 
@@ -648,7 +654,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   // 8. Client-side CSV generator for export
   const handleExportCSV = () => {
-    let csv = "Name,Email,College,Program,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
     for (const student of students) {
       const isAttended = student.scanned_at ? "Yes" : "No";
       const scannedTime = student.scanned_at ? new Date(student.scanned_at).toISOString() : "--:--";
@@ -658,6 +664,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       const escapedEmail = student.email.replace(/"/g, '""');
       const escapedCollege = student.college.replace(/"/g, '""');
       const escapedProgram = (student.program || "").replace(/"/g, '""');
+      const escapedYear = (student.year || "").replace(/"/g, '""');
       const escapedSection = (student.section || "").replace(/"/g, '""');
       const deliveryStatus = student.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
       const escapedMessageId = (student.provider_message_id || "").replace(/"/g, '""');
@@ -665,7 +672,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       const lastAttempt = student.last_attempt_at ? new Date(student.last_attempt_at).toISOString() : "";
       const escapedScanner = scannerName.replace(/"/g, '""');
       
-      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
     
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -952,7 +959,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                       <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-brand-text font-bold truncate max-w-[150px]">{student.full_name}</span>
-                          <span className="text-brand-text/40">({student.college} · {student.program || "Program not provided"} · {student.section || "Section not provided"})</span>
+                          <span className="text-brand-text/40">({student.college} · {student.program || "Program not provided"} · {student.year || "Year not provided"} · {student.section || "Section not provided"})</span>
                         </div>
                         <span className="text-brand-text/60 truncate">{student.email}</span>
                         <span className="text-red-400/90 text-[10px] mt-0.5 whitespace-pre-wrap leading-relaxed">
@@ -1069,7 +1076,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           </div>
 
           <p className="text-[11px] font-mono text-brand-text/55 bg-brand-primary-dark/40 border border-brand-accent/10 rounded-xl px-4 py-3">
-            Required CSV columns, in order: <span className="text-brand-accent">Name, Email, College, Program, Section</span>. Exported reports keep these first five columns and append delivery/audit fields, so they can be imported again.
+            Required CSV columns, in order: <span className="text-brand-accent">Name, Email, College, Program, Year, Section</span>. Exported reports keep these first six columns and append delivery/audit fields, so they can be imported again.
           </p>
 
           {/* Email Delivery Toggle Checkbox */}
@@ -1095,7 +1102,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               
               {addError && <div className="text-xs text-red-400 bg-red-950/20 p-2.5 rounded border border-red-500/20">{addError}</div>}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Full Name</label>
                   <input
@@ -1145,6 +1152,18 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                   />
                 </div>
                 <div>
+                  <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Year</label>
+                  <input
+                    id="add-year-input"
+                    type="text"
+                    required
+                    value={newYear}
+                    onChange={(e) => setNewYear(e.target.value)}
+                    className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text focus:outline-none focus:border-brand-accent"
+                    placeholder="3rd Year"
+                  />
+                </div>
+                <div>
                   <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Section</label>
                   <input
                     id="add-section-input"
@@ -1186,7 +1205,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <h3 className="font-serif text-sm font-bold uppercase tracking-wider text-brand-accent">
                   📋 Bulk Paste CSV Registrants
                 </h3>
-                <span className="text-[10px] font-mono opacity-60">Format: name,email,college,program,section</span>
+                <span className="text-[10px] font-mono opacity-60">Format: name,email,college,program,year,section</span>
               </div>
 
               {bulkPasteError && <div className="text-xs text-red-400 bg-red-950/20 p-2.5 rounded border border-red-500/20">{bulkPasteError}</div>}
@@ -1227,7 +1246,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                   required
                   value={bulkPasteText}
                   onChange={(e) => setBulkPasteText(e.target.value)}
-                  placeholder="name,email,college,program,section&#10;John Doe,john@example.com,CCIS,BS Computer Science,3A&#10;Jane Smith,jane@example.com,CCIS,BS Information Technology,2B"
+                  placeholder="name,email,college,program,year,section&#10;John Doe,john@example.com,CCIS,BS Computer Science,3rd Year,3A&#10;Jane Smith,jane@example.com,CCIS,BS Information Technology,2nd Year,2B"
                   className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text font-mono focus:outline-none focus:border-brand-accent placeholder-brand-text/25"
                 />
               </div>
@@ -1399,6 +1418,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <th className="px-6 py-4 font-semibold">Full Name</th>
                 <th className="px-6 py-4 font-semibold">College Dept</th>
                 <th className="px-6 py-4 font-semibold">Program</th>
+                <th className="px-6 py-4 font-semibold">Year</th>
                 <th className="px-6 py-4 font-semibold">Section</th>
                 <th className="px-6 py-4 font-semibold text-center">Email Status</th>
                 <th className="px-6 py-4 font-semibold text-center">Attendance</th>
@@ -1409,7 +1429,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             <tbody className="divide-y divide-brand-text/5 text-xs">
               {paginatedStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-brand-text/40 italic font-mono">
+                  <td colSpan={10} className="px-6 py-12 text-center text-brand-text/40 italic font-mono">
                     No registry rows matching current search parameters.
                   </td>
                 </tr>
@@ -1425,6 +1445,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                     <td className="px-6 py-3.5 font-serif italic text-brand-text font-semibold">{s.full_name}</td>
                     <td className="px-6 py-3.5 text-brand-text/60 font-sans">{s.college}</td>
                     <td className="px-6 py-3.5 text-brand-text/60 font-sans">{s.program || "Not provided"}</td>
+                    <td className="px-6 py-3.5 text-brand-text/60 font-mono">{s.year || "Not provided"}</td>
                     <td className="px-6 py-3.5 text-brand-text/60 font-mono">{s.section || "Not provided"}</td>
                     <td className="px-6 py-3.5 text-center">
                       {s.delivery_status === "smtp_accepted" ? (

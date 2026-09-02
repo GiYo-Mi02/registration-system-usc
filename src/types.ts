@@ -4,6 +4,7 @@ export interface Student {
   email: string;
   college: string;
   program: string | null;
+  year: string | null;
   section: string | null;
   form_response_id: string;
   imported_at: string;

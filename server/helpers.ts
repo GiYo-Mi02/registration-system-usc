@@ -64,11 +64,13 @@ export function generateEmailTemplate(
   qrDataUrl: string,
   description: string,
   program: string = "",
+  year: string = "",
   section: string = ""
 ): string {
   const escapedName = escapeHTML(fullName);
   const escapedCollege = escapeHTML(college);
   const escapedProgram = escapeHTML(program || "Not provided");
+  const escapedYear = escapeHTML(year || "Not provided");
   const escapedSection = escapeHTML(section || "Not provided");
   const escapedEvent = escapeHTML(eventName);
   const escapedDate = escapeHTML(eventDate);
@@ -135,6 +137,10 @@ export function generateEmailTemplate(
                   <tr>
                         <td class="detail-label" width="115" valign="top" style="width:115px; padding:8px 8px 8px 0; color:#2183C8; font-size:10px; font-weight:900; letter-spacing:1px; text-transform:uppercase; border-top:1px dashed #D9CBE8;">Program</td>
                         <td valign="top" style="padding:8px 0; color:#2A124A; font-size:13px; line-height:18px; font-weight:800; text-transform:uppercase; border-top:1px dashed #D9CBE8; word-break:break-word;">${escapedProgram}</td>
+                  </tr>
+                  <tr>
+                        <td class="detail-label" width="115" valign="top" style="width:115px; padding:8px 8px 8px 0; color:#43A62C; font-size:10px; font-weight:900; letter-spacing:1px; text-transform:uppercase; border-top:1px dashed #D9CBE8;">Year</td>
+                        <td valign="top" style="padding:8px 0; color:#2A124A; font-size:13px; line-height:18px; font-weight:800; text-transform:uppercase; border-top:1px dashed #D9CBE8; word-break:break-word;">${escapedYear}</td>
                   </tr>
                   <tr>
                         <td class="detail-label" width="115" valign="top" style="width:115px; padding:8px 8px 8px 0; color:#C49A00; font-size:10px; font-weight:900; letter-spacing:1px; text-transform:uppercase; border-top:1px dashed #D9CBE8;">Section</td>

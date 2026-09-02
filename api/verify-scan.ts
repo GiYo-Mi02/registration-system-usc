@@ -119,6 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         email: result.student_email,
         college: result.student_college,
         program: result.student_program,
+        year: result.student_year,
         section: result.student_section
       },
       scanned_at: result.scanned_at,

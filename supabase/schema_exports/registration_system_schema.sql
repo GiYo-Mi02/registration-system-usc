@@ -42,6 +42,9 @@ create table public.students (
   program text
     constraint students_program_not_blank
     check (program is null or btrim(program) <> ''::text),
+  year text
+    constraint students_year_not_blank
+    check (year is null or btrim(year) <> ''::text),
   section text
     constraint students_section_not_blank
     check (section is null or btrim(section) <> ''::text)
@@ -49,6 +52,9 @@ create table public.students (
 
 comment on column public.students.program is
   'Student academic program or degree, supplied during registration/import.';
+
+comment on column public.students.year is
+  'Student academic year level, supplied during registration/import.';
 
 comment on column public.students.section is
   'Student class section, supplied during registration/import.';
@@ -191,6 +197,7 @@ returns table (
   student_email text,
   student_college text,
   student_program text,
+  student_year text,
   student_section text,
   scanned_at timestamptz,
   original_time text,
@@ -208,6 +215,7 @@ declare
   v_student_email text;
   v_student_college text;
   v_student_program text;
+  v_student_year text;
   v_student_section text;
   v_scanner_name text;
 begin
@@ -248,8 +256,8 @@ begin
     return;
   end if;
 
-  select s.full_name, s.email, s.college, s.program, s.section
-  into v_student_name, v_student_email, v_student_college, v_student_program, v_student_section
+  select s.full_name, s.email, s.college, s.program, s.year, s.section
+  into v_student_name, v_student_email, v_student_college, v_student_program, v_student_year, v_student_section
   from public.students as s
   where s.id = p_student_id;
 
@@ -278,6 +286,7 @@ begin
     student_email := v_student_email;
     student_college := v_student_college;
     student_program := v_student_program;
+    student_year := v_student_year;
     student_section := v_student_section;
     scanned_at := v_original_scanned_at;
     original_time := pg_catalog.to_char(
@@ -310,6 +319,7 @@ begin
   student_email := v_student_email;
   student_college := v_student_college;
   student_program := v_student_program;
+  student_year := v_student_year;
   student_section := v_student_section;
   scanned_at := v_scanned_at;
   original_time := '';

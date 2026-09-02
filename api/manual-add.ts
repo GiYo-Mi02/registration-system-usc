@@ -56,15 +56,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: "Method not allowed" });
   }
 
-  const { full_name, email, college, program, section, eventId, skipEmails } = req.body;
+  const { full_name, email, college, program, year, section, eventId, skipEmails } = req.body;
   const trimmedName = String(full_name || "").trim();
   const trimmedEmail = String(email || "").trim();
   const trimmedCollege = String(college || "").trim();
   const trimmedProgram = String(program || "").trim();
+  const trimmedYear = String(year || "").trim();
   const trimmedSection = String(section || "").trim();
 
-  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedSection || !eventId) {
-    return res.status(400).json({ success: false, message: "Name, email, college, program, section, and event are required." });
+  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedYear || !trimmedSection || !eventId) {
+    return res.status(400).json({ success: false, message: "Name, email, college, program, year, section, and event are required." });
   }
 
   try {
@@ -89,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         email: trimmedEmail,
         college: trimmedCollege,
         program: trimmedProgram,
+        year: trimmedYear,
         section: trimmedSection,
         form_response_id: formResponseId,
         email_status: "failed",
@@ -142,6 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       qrDataUrl,
       eventDesc,
       trimmedProgram,
+      trimmedYear,
       trimmedSection
     );
 

@@ -6,7 +6,7 @@ stored secrets, and email credentials are intentionally not included.
 
 `registration_system_schema.sql` was assembled from live Supabase CLI queries
 against project `frgxvvktenjwwuflfnal` and updated on 2026-09-02. It includes the seven
-registration tables, constraints, the case-insensitive event/email index, RLS
+registration tables (including student program, year, and section), constraints, the case-insensitive event/email index, RLS
 state, table grants, the service-role-only attendance verification RPC, and the
 SMTP delivery receipt fields/recorder RPC added for provider-level troubleshooting.
 

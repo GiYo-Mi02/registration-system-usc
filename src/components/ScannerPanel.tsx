@@ -66,6 +66,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       email: string;
       college: string;
       program?: string | null;
+      year?: string | null;
       section?: string | null;
     };
     message?: string;
@@ -587,10 +588,10 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                         <p className="text-xs md:text-sm opacity-90 font-mono leading-normal">
                           College: <span className="text-white font-semibold">{scanResult?.student?.college}</span>
                         </p>
-                        {(scanResult?.student?.program || scanResult?.student?.section) && (
+                        {(scanResult?.student?.program || scanResult?.student?.year || scanResult?.student?.section) && (
                           <p className="text-xs md:text-sm opacity-90 font-mono leading-normal">
-                            Program / Section: <span className="text-white font-semibold">
-                              {[scanResult?.student?.program, scanResult?.student?.section].filter(Boolean).join(" / ")}
+                            Program / Year / Section: <span className="text-white font-semibold">
+                              {[scanResult?.student?.program, scanResult?.student?.year, scanResult?.student?.section].filter(Boolean).join(" / ")}
                             </span>
                           </p>
                         )}

@@ -142,6 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           qrDataUrl,
           eventDesc,
           student.program,
+          student.year,
           student.section
         );
 

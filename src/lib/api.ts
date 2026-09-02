@@ -184,7 +184,7 @@ export async function getEmailPreview(token: string, studentId: string): Promise
 // ─── MANUAL ADD ────────────────────────────────────────────────────────────
 export async function addStudentManual(
   token: string,
-  payload: { full_name: string; email: string; college: string; program: string; section: string; eventId: string; skipEmails?: boolean }
+  payload: { full_name: string; email: string; college: string; program: string; year: string; section: string; eventId: string; skipEmails?: boolean }
 ): Promise<{ success: boolean; message?: string }> {
   const res = await fetch("/api/manual-add", {
     method: "POST",
@@ -204,7 +204,7 @@ export async function addStudentManual(
 export async function importCsvStudents(
   token: string,
   eventId: string,
-  students: { full_name: string; email: string; college: string; program: string; section: string }[],
+  students: { full_name: string; email: string; college: string; program: string; year: string; section: string }[],
   skipEmails?: boolean
 ): Promise<{ success: boolean; message?: string; insertedCount?: number; updatedCount?: number }> {
   const res = await fetch("/api/import-csv", {
@@ -261,7 +261,7 @@ export async function verifyScan(
   sessionToken: string
 ): Promise<{
   status: "VALID" | "ALREADY_USED" | "FAKE";
-  student?: { full_name: string; email: string; college: string; program?: string | null; section?: string | null };
+  student?: { full_name: string; email: string; college: string; program?: string | null; year?: string | null; section?: string | null };
   scanned_at?: string;
   original_time?: string;
   scanned_by_name?: string;
