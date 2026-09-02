@@ -433,22 +433,32 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
   }
 
   try {
-    let query = supabase
-      .from("students")
-      .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message, delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)", { count: "exact" })
-      .eq("event_id", eventId)
-      .order("imported_at", { ascending: false });
+    const pageSize = 1000;
+    const data: any[] = [];
 
-    if (search) {
-      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,college.ilike.%${search}%,program.ilike.%${search}%,year.ilike.%${search}%,section.ilike.%${search}%`);
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from("students")
+        .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message, delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)")
+        .eq("event_id", eventId)
+        .order("imported_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (search) {
+        query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,college.ilike.%${search}%,program.ilike.%${search}%,year.ilike.%${search}%,section.ilike.%${search}%`);
+      }
+
+      if (collegeFilter) {
+        query = query.eq("college", collegeFilter);
+      }
+
+      const { data: pageData, error } = await query;
+      if (error) throw error;
+      const rows = pageData || [];
+      data.push(...rows);
+      if (rows.length < pageSize) break;
     }
-
-    if (collegeFilter) {
-      query = query.eq("college", collegeFilter);
-    }
-
-    const { data, count, error } = await query;
-    if (error) throw error;
 
     const { data: scanners } = await supabase.from("committee_users").select("id, committee_name");
     const scannerMap = new Map(scanners?.map(s => [s.id, s.committee_name]) || []);

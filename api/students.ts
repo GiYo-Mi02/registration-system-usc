@@ -11,6 +11,55 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   }
 });
 
+const STUDENT_PAGE_SIZE = 1000;
+
+const STUDENT_SELECT = `
+  id, full_name, email, college, program, year, section, form_response_id, imported_at, email_status, email_error,
+  attendance(scanned_at, scanned_by),
+  email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)
+`;
+
+async function fetchAllStudents(eventId: string) {
+  const allStudents: any[] = [];
+
+  for (let from = 0; ; from += STUDENT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("students")
+      .select(STUDENT_SELECT)
+      .eq("event_id", eventId)
+      .order("imported_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + STUDENT_PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const page = data || [];
+    allStudents.push(...page);
+    if (page.length < STUDENT_PAGE_SIZE) break;
+  }
+
+  return allStudents;
+}
+
+async function fetchAllStudentIds(eventId: string) {
+  const allIds: string[] = [];
+
+  for (let from = 0; ; from += STUDENT_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("students")
+      .select("id")
+      .eq("event_id", eventId)
+      .order("id", { ascending: true })
+      .range(from, from + STUDENT_PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const page = data || [];
+    allIds.push(...page.map(student => student.id));
+    if (page.length < STUDENT_PAGE_SIZE) break;
+  }
+
+  return allIds;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, DELETE, OPTIONS");
@@ -45,18 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ success: false, message: "eventId parameter is required." });
       }
 
-      // Fetch students with attendance
-      const { data: students, error: stdErr } = await supabase
-        .from("students")
-        .select(`
-          id, full_name, email, college, program, year, section, form_response_id, imported_at, email_status, email_error,
-          attendance(scanned_at, scanned_by),
-          email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)
-        `)
-        .eq("event_id", eventId)
-        .order("imported_at", { ascending: false });
-
-      if (stdErr) throw stdErr;
+      // Supabase Data API responses are capped, so fetch every deterministic page.
+      const students = await fetchAllStudents(eventId);
 
       // Fetch committee users for name mapping
       const { data: scanners } = await supabase
@@ -114,14 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // Fetch all student IDs for this event
-        const { data: studentRecords, error: fetchErr } = await supabase
-          .from("students")
-          .select("id")
-          .eq("event_id", eventId);
-
-        if (fetchErr) throw fetchErr;
-
-        const studentIds = (studentRecords || []).map(s => s.id);
+        const studentIds = await fetchAllStudentIds(eventId);
 
         if (studentIds.length > 0) {
           const chunkSize = 100;
