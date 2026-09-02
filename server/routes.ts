@@ -275,6 +275,23 @@ router.post("/api/logout", async (req, res) => {
   }
 });
 
+router.delete("/api/heartbeat", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, message: "Session token is required" });
+  }
+
+  try {
+    await supabase
+      .from("committee_sessions")
+      .delete()
+      .eq("session_token", authHeader.substring(7));
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Logout failed" });
+  }
+});
+
 router.post("/api/auth/heartbeat", async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ success: false, message: "Token required" });

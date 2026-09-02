@@ -18,7 +18,7 @@ The architecture keeps all database access behind authenticated application endp
 *   [**`api/email-preview.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/api/email-preview.ts): Retrieves stored HTML preview templates.
 *   [**`api/reset-db.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/api/reset-db.ts): Resets database to factory demo registrants.
 *   **`api/verify-scan.ts`**: Validates the committee session, event, QR HMAC, and stored token before invoking the service-role-only attendance RPC.
-*   **`api/logout.ts`**: Revokes the current custom session without exposing database access to the browser.
+*   **`DELETE /api/heartbeat`**: Revokes the current custom session without exposing database access to the browser.
 
 ### 2. Frontend Client Libraries (`src/lib/*`)
 *   [**`src/lib/auth.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/lib/auth.ts): Formulates HTTP login/logout operations and server-validated session heartbeats.

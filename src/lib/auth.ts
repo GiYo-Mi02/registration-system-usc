@@ -39,8 +39,8 @@ export async function loginUser(
 // ─── LOGOUT ────────────────────────────────────────────────────────────────
 export async function logoutUser(token: string): Promise<void> {
   try {
-    await fetch("/api/logout", {
-      method: "POST",
+    await fetch("/api/heartbeat", {
+      method: "DELETE",
       headers: { "Authorization": `Bearer ${token}` }
     });
   } catch (e) {
