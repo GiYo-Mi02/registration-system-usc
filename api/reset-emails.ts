@@ -85,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Update students table
         const { error: updateErr } = await supabase
           .from("students")
-          .update({ email_status: "failed", email_error: null })
+          .update({ email_status: "failed", email_error: "queued" })
           .in("id", chunkIds);
 
         if (updateErr) throw updateErr;
@@ -93,7 +93,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Update email logs
         const { error: logErr } = await supabase
           .from("email_log")
-          .update({ status: "failed", error_message: "queued" })
+          .update({
+            status: "failed",
+            error_message: "queued",
+            delivery_status: "queued",
+            provider_message_id: null,
+            provider_response: null,
+            accepted_recipients: [],
+            rejected_recipients: []
+          })
           .in("student_id", chunkIds);
 
         if (logErr) throw logErr;

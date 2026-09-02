@@ -2,11 +2,18 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import QRCode from "qrcode";
 import { createClient } from "@supabase/supabase-js";
-import { generateEmailTemplate, sendEmail, isEmailQuotaExceeded } from "../server/helpers";
+import {
+  failedDeliveryAttemptArgs,
+  generateEmailTemplate,
+  isEmailQuotaExceeded,
+  recordEmailDeliveryAttempt,
+  sendEmail,
+  successfulDeliveryAttemptArgs
+} from "../server/helpers";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const QR_SECRET = process.env.QR_SECRET || "default_dev_secret_key_change_me_in_production";
+const QR_SECRET = process.env.QR_SECRET || "";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
@@ -23,6 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
+  }
+  if (!QR_SECRET) {
+    return res.status(503).json({ success: false, message: "QR signing service is not configured." });
   }
 
   const authHeader = req.headers.authorization;
@@ -46,12 +56,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: "Method not allowed" });
   }
 
-  const { full_name, email, college, eventId, skipEmails } = req.body;
-  if (!full_name || !email || !college || !eventId) {
-    return res.status(400).json({ success: false, message: "All fields are required" });
-  }
+  const { full_name, email, college, program, section, eventId, skipEmails } = req.body;
+  const trimmedName = String(full_name || "").trim();
+  const trimmedEmail = String(email || "").trim();
+  const trimmedCollege = String(college || "").trim();
+  const trimmedProgram = String(program || "").trim();
+  const trimmedSection = String(section || "").trim();
 
-  const trimmedEmail = email.trim();
+  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedSection || !eventId) {
+    return res.status(400).json({ success: false, message: "Name, email, college, program, section, and event are required." });
+  }
 
   try {
     // Check if already registered
@@ -59,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("students")
       .select("id")
       .eq("event_id", eventId)
-      .eq("email", trimmedEmail)
+      .ilike("email", trimmedEmail)
       .maybeSingle();
 
     if (existing) {
@@ -71,9 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .from("students")
       .insert({
         event_id: eventId,
-        full_name,
+        full_name: trimmedName,
         email: trimmedEmail,
-        college,
+        college: trimmedCollege,
+        program: trimmedProgram,
+        section: trimmedSection,
         form_response_id: formResponseId,
         email_status: "failed",
         email_error: "queued"
@@ -111,13 +127,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq("id", eventId)
       .single();
 
-    const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+    const eventName = eventInfo?.name || "CCIS Lead Forward 2026";
     const eventDate = eventInfo?.event_date || "October 24, 2026";
     const eventVenue = eventInfo?.venue || "UMak Grand Theater";
     const eventDesc = eventInfo?.description || "";
 
     const qrDataUrl = await QRCode.toDataURL(signedToken, { margin: 1, scale: 6 });
-    const emailHtml = generateEmailTemplate(full_name, college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+    const emailHtml = generateEmailTemplate(
+      trimmedName,
+      trimmedCollege,
+      eventName,
+      eventDate,
+      eventVenue,
+      qrDataUrl,
+      eventDesc,
+      trimmedProgram,
+      trimmedSection
+    );
 
     await supabase.from("email_log").insert({
       student_id: student.id,
@@ -129,13 +155,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!skipEmails) {
       if (isEmailQuotaExceeded()) {
-        await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+        const quotaError = new Error("Daily user sending limit exceeded (550 5.4.5)");
+        await recordEmailDeliveryAttempt(
+          supabase,
+          failedDeliveryAttemptArgs(student.id, quotaError, emailHtml, qrDataUrl)
+        );
+        await supabase.from("students").update({ email_status: "failed", email_error: quotaError.message }).eq("id", student.id);
       } else {
         try {
-          await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+          const receipt = await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          const trackingWarning = await recordEmailDeliveryAttempt(
+            supabase,
+            successfulDeliveryAttemptArgs(student.id, receipt, emailHtml, qrDataUrl)
+          );
+          const studentError = receipt.simulated
+            ? "SMTP simulation only; no email was submitted."
+            : trackingWarning;
+          await supabase.from("students").update({
+            email_status: receipt.simulated ? "failed" : "sent",
+            email_error: studentError
+          }).eq("id", student.id);
         } catch (e: any) {
           const errMsg = e?.message || String(e);
           const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
@@ -143,10 +182,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             email_status: "failed",
             email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
           }).eq("id", student.id);
-          await supabase.from("email_log").update({
-            status: "failed",
-            error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
-          }).eq("student_id", student.id);
+          await recordEmailDeliveryAttempt(
+            supabase,
+            failedDeliveryAttemptArgs(student.id, e, emailHtml, qrDataUrl)
+          );
         }
       }
     }

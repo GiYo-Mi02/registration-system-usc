@@ -1,8 +1,8 @@
-# Migration Walkthrough: Direct Supabase Client + Native Vercel Serverless Functions
+# Migration Walkthrough: Authenticated Vercel API + Supabase
 
-We have successfully migrated the architecture from a combined Express/Vercel serverless proxy model to a clean, decoupled design where:
-1. The **React frontend** communicates directly with Supabase via `@supabase/supabase-js` for reads.
-2. High-privilege actions (event creation/deletion, manual student registration, bulk CSV imports, ticket email resends, email previews) run securely in standalone **Vercel native serverless functions** using the database service role key to bypass **Row Level Security (RLS)** constraints.
+The architecture keeps all database access behind authenticated application endpoints:
+1. The **React frontend** communicates only with `/api/*` routes and never receives a Supabase service-role key.
+2. Database and email actions run in standalone **Vercel native serverless functions** using the service role only on the server.
 
 ---
 
@@ -17,10 +17,11 @@ We have successfully migrated the architecture from a combined Express/Vercel se
 *   [**`api/resend.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/api/resend.ts): Re-generates ticket QR codes and dispatches them via SMTP.
 *   [**`api/email-preview.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/api/email-preview.ts): Retrieves stored HTML preview templates.
 *   [**`api/reset-db.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/api/reset-db.ts): Resets database to factory demo registrants.
+*   **`api/verify-scan.ts`**: Validates the committee session, event, QR HMAC, and stored token before invoking the service-role-only attendance RPC.
+*   **`api/logout.ts`**: Revokes the current custom session without exposing database access to the browser.
 
 ### 2. Frontend Client Libraries (`src/lib/*`)
-*   [**`src/lib/supabase.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/lib/supabase.ts): Initializes the Supabase client using `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-*   [**`src/lib/auth.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/lib/auth.ts): Formulates HTTP login/logout operations and handles direct session updates/heartbeats.
+*   [**`src/lib/auth.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/lib/auth.ts): Formulates HTTP login/logout operations and server-validated session heartbeats.
 *   [**`src/lib/api.ts`**](file:///c:/Users/gio%20joshua%20gonzales/OneDrive/Desktop/regisystem/src/lib/api.ts): Wraps backend endpoint HTTP requests (passing the Bearer token in the headers for all calls).
 
 ### 3. Local Development Compatibility
@@ -51,8 +52,6 @@ We have successfully migrated the architecture from a combined Express/Vercel se
 ## 💡 Important Actions Required on Vercel Dashboard
 Since this is a fresh architecture, make sure to add these key environment variables on your **Vercel Settings Dashboard** to ensure the build compiles and runs:
 
-*   `VITE_SUPABASE_URL` = (Your Supabase URL)
-*   `VITE_SUPABASE_ANON_KEY` = (Your Supabase Anon Key)
 *   `SUPABASE_URL` = (Your Supabase URL)
 *   `SUPABASE_SERVICE_ROLE_KEY` = (Your Supabase Service Role Key)
 *   `QR_SECRET` = (Your HMAC signing secret)

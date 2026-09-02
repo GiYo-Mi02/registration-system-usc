@@ -1,4 +1,3 @@
-import { supabase } from "./supabase";
 import { Student, Event } from "../types";
 
 // ─── EVENTS ────────────────────────────────────────────────────────────────
@@ -131,7 +130,20 @@ export async function resetEmailStatuses(token: string, eventId: string, emails?
   }
 }
 
-export async function resendBulk(token: string, eventId: string, target?: "failed" | "not_attended"): Promise<{ success: boolean; message?: string; count?: number }> {
+export async function resendBulk(
+  token: string,
+  eventId: string,
+  studentIds: string[]
+): Promise<{
+  success: boolean;
+  message?: string;
+  count?: number;
+  requestedCount?: number;
+  acceptedCount?: number;
+  failedCount?: number;
+  simulatedCount?: number;
+  quotaExceeded?: boolean;
+}> {
   try {
     const res = await fetch("/api/resend-bulk", {
       method: "POST",
@@ -139,10 +151,19 @@ export async function resendBulk(token: string, eventId: string, target?: "faile
         "Content-Type": "application/json",
         "Authorization": `Bearer ${token}`
       },
-      body: JSON.stringify({ eventId, target })
+      body: JSON.stringify({ eventId, studentIds })
     });
     const data = await res.json();
-    return { success: data.success, message: data.message, count: data.count };
+    return {
+      success: data.success,
+      message: data.message,
+      count: data.count,
+      requestedCount: data.requestedCount,
+      acceptedCount: data.acceptedCount,
+      failedCount: data.failedCount,
+      simulatedCount: data.simulatedCount,
+      quotaExceeded: data.quotaExceeded
+    };
   } catch (e: any) {
     return { success: false, message: e.message || "Network error triggering bulk resend." };
   }
@@ -163,7 +184,7 @@ export async function getEmailPreview(token: string, studentId: string): Promise
 // ─── MANUAL ADD ────────────────────────────────────────────────────────────
 export async function addStudentManual(
   token: string,
-  payload: { full_name: string; email: string; college: string; eventId: string; skipEmails?: boolean }
+  payload: { full_name: string; email: string; college: string; program: string; section: string; eventId: string; skipEmails?: boolean }
 ): Promise<{ success: boolean; message?: string }> {
   const res = await fetch("/api/manual-add", {
     method: "POST",
@@ -183,9 +204,9 @@ export async function addStudentManual(
 export async function importCsvStudents(
   token: string,
   eventId: string,
-  students: { full_name: string; email: string; college: string }[],
+  students: { full_name: string; email: string; college: string; program: string; section: string }[],
   skipEmails?: boolean
-): Promise<{ success: boolean; message?: string; insertedCount?: number }> {
+): Promise<{ success: boolean; message?: string; insertedCount?: number; updatedCount?: number }> {
   const res = await fetch("/api/import-csv", {
     method: "POST",
     headers: { 
@@ -198,7 +219,7 @@ export async function importCsvStudents(
     try { const d = await res.json(); return { success: false, message: d.message }; } catch { return { success: false, message: "Import failed" }; }
   }
   const data = await res.json();
-  return { success: data.success, message: data.message, insertedCount: data.insertedCount };
+  return { success: data.success, message: data.message, insertedCount: data.insertedCount, updatedCount: data.updatedCount };
 }
 
 export async function resendTicket(
@@ -232,61 +253,32 @@ export async function resetDatabase(token: string): Promise<{ success: boolean; 
 }
 
 // ─── VERIFY SCAN ──────────────────────────────────────────────────────────
-// Calls Supabase RPC verify_attendance_scan directly — no Express needed!
+// Calls the authenticated server endpoint, which validates the custom
+// committee session and QR HMAC before invoking the service-role-only RPC.
 export async function verifyScan(
   token: string,
-  scannedBy: string,
-  eventId: string
+  eventId: string,
+  sessionToken: string
 ): Promise<{
   status: "VALID" | "ALREADY_USED" | "FAKE";
-  student?: { full_name: string; email: string; college: string };
+  student?: { full_name: string; email: string; college: string; program?: string | null; section?: string | null };
   scanned_at?: string;
   original_time?: string;
   scanned_by_name?: string;
   message?: string;
   time_string?: string;
 }> {
-  // Parse token: studentId:eventId:nonce:signature
-  const parts = token.split(":");
-  if (parts.length !== 4) return { status: "FAKE", message: "Malformed token format." };
-
-  const [studentId, tokenEventId] = parts;
-
-  // Cross-check event
-  if (eventId && tokenEventId !== eventId) {
-    return { status: "FAKE", message: "This ticket is not valid for this event." };
-  }
-
-  // Verify via existing Supabase RPC (handles HMAC verification server-side in DB)
-  const { data, error } = await supabase.rpc("verify_attendance_scan", {
-    p_student_id: studentId,
-    p_token: token,
-    p_scanned_by: scannedBy,
+  const response = await fetch("/api/verify-scan", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${sessionToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ token, eventId })
   });
-
-  if (error || !data || data.length === 0) {
-    return { status: "FAKE", message: "Scan verification failed. Token may be invalid." };
+  const data = await response.json().catch(() => ({ message: "Scanner returned an unreadable response." }));
+  if (!response.ok) {
+    throw new Error(data.message || "Scan verification failed.");
   }
-
-  const result = data[0];
-
-  if (result.status === "VALID") {
-    return {
-      status: "VALID",
-      student: { full_name: result.student_name, email: result.student_email, college: result.student_college },
-      scanned_at: result.scanned_at,
-      scanned_by_name: result.scanned_by_name,
-      time_string: result.scanned_at ? new Date(result.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : undefined,
-    };
-  } else if (result.status === "ALREADY_USED") {
-    return {
-      status: "ALREADY_USED",
-      student: { full_name: result.student_name, email: result.student_email, college: result.student_college },
-      scanned_at: result.scanned_at,
-      original_time: result.original_time,
-      scanned_by_name: result.scanned_by_name,
-    };
-  }
-
-  return { status: "FAKE", message: "Scan entry mismatch." };
+  return data;
 }

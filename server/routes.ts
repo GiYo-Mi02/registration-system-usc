@@ -12,9 +12,12 @@ import {
 } from "./middleware";
 import {
   escapeHTML,
+  failedDeliveryAttemptArgs,
   generateEmailTemplate,
+  isEmailQuotaExceeded,
+  recordEmailDeliveryAttempt,
   sendEmail,
-  isEmailQuotaExceeded
+  successfulDeliveryAttemptArgs
 } from "./helpers";
 
 const router = express.Router();
@@ -255,6 +258,23 @@ router.post("/api/auth/logout", async (req, res) => {
   }
 });
 
+router.post("/api/logout", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, message: "Session token is required" });
+  }
+
+  try {
+    await supabase
+      .from("committee_sessions")
+      .delete()
+      .eq("session_token", authHeader.substring(7));
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Logout failed" });
+  }
+});
+
 router.post("/api/auth/heartbeat", async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ success: false, message: "Token required" });
@@ -398,12 +418,12 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
   try {
     let query = supabase
       .from("students")
-      .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message)", { count: "exact" })
+      .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message, delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)", { count: "exact" })
       .eq("event_id", eventId)
       .order("imported_at", { ascending: false });
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,college.ilike.%${search}%,program.ilike.%${search}%,section.ilike.%${search}%`);
     }
 
     if (collegeFilter) {
@@ -417,8 +437,8 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
     const scannerMap = new Map(scanners?.map(s => [s.id, s.committee_name]) || []);
 
     let students = (data || []).map((s: any) => {
-      const att = s.attendance;
-      const email = s.email_log;
+      const att = Array.isArray(s.attendance) ? s.attendance[0] : s.attendance;
+      const email = Array.isArray(s.email_log) ? s.email_log[0] : s.email_log;
       const scanned_by = att?.scanned_by;
       
       let scanned_by_name = undefined;
@@ -431,10 +451,17 @@ router.get("/api/students", authenticateToken, async (req, res, next) => {
         full_name: s.full_name,
         email: s.email,
         college: s.college,
+        program: s.program,
+        section: s.section,
         form_response_id: s.form_response_id,
         imported_at: s.imported_at,
         email_status: email?.status || s.email_status || "failed",
         email_error: email?.error_message || s.email_error || undefined,
+        delivery_status: email?.delivery_status || null,
+        provider_message_id: email?.provider_message_id || null,
+        provider_response: email?.provider_response || null,
+        last_attempt_at: email?.last_attempt_at || null,
+        attempt_count: email?.attempt_count || 0,
         scanned_at: att?.scanned_at || null,
         scanned_by_name
       };
@@ -528,19 +555,23 @@ router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
 });
 
 router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, requireAdmin, async (req, res) => {
-  const { full_name, email, college, eventId, skipEmails } = req.body;
-  if (!full_name || !email || !college || !eventId) {
-    return res.status(400).json({ success: false, message: "All fields are required" });
-  }
+  const { full_name, email, college, program, section, eventId, skipEmails } = req.body;
+  const trimmedName = String(full_name || "").trim();
+  const trimmedEmail = String(email || "").trim();
+  const trimmedCollege = String(college || "").trim();
+  const trimmedProgram = String(program || "").trim();
+  const trimmedSection = String(section || "").trim();
 
-  const trimmedEmail = email.trim();
+  if (!trimmedName || !trimmedEmail || !trimmedCollege || !trimmedProgram || !trimmedSection || !eventId) {
+    return res.status(400).json({ success: false, message: "Name, email, college, program, section, and event are required." });
+  }
 
   try {
     const { data: existing } = await supabase
       .from("students")
       .select("id")
       .eq("event_id", eventId)
-      .eq("email", trimmedEmail)
+      .ilike("email", trimmedEmail)
       .maybeSingle();
 
     if (existing) {
@@ -552,9 +583,11 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
       .from("students")
       .insert({
         event_id: eventId,
-        full_name,
+        full_name: trimmedName,
         email: trimmedEmail,
-        college,
+        college: trimmedCollege,
+        program: trimmedProgram,
+        section: trimmedSection,
         form_response_id: formResponseId,
         email_status: "failed",
         email_error: "queued"
@@ -592,13 +625,23 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
       .eq("id", eventId)
       .single();
 
-    const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+    const eventName = eventInfo?.name || "CCIS Lead Forward 2026";
     const eventDate = eventInfo?.event_date || "October 24, 2026";
     const eventVenue = eventInfo?.venue || "UMak Grand Theater";
     const eventDesc = eventInfo?.description || "";
 
     const qrDataUrl = await QRCode.toDataURL(signedToken, { margin: 1, scale: 6 });
-    const emailHtml = generateEmailTemplate(full_name, college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+    const emailHtml = generateEmailTemplate(
+      trimmedName,
+      trimmedCollege,
+      eventName,
+      eventDate,
+      eventVenue,
+      qrDataUrl,
+      eventDesc,
+      trimmedProgram,
+      trimmedSection
+    );
 
     await supabase.from("email_log").insert({
       student_id: student.id,
@@ -610,13 +653,23 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
 
     if (!skipEmails) {
       if (isEmailQuotaExceeded()) {
-        await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
-        await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+        const quotaError = new Error("Daily user sending limit exceeded (550 5.4.5)");
+        await recordEmailDeliveryAttempt(
+          supabase,
+          failedDeliveryAttemptArgs(student.id, quotaError, emailHtml, qrDataUrl)
+        );
+        await supabase.from("students").update({ email_status: "failed", email_error: quotaError.message }).eq("id", student.id);
       } else {
         try {
-          await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-          await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+          const receipt = await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+          const trackingWarning = await recordEmailDeliveryAttempt(
+            supabase,
+            successfulDeliveryAttemptArgs(student.id, receipt, emailHtml, qrDataUrl)
+          );
+          await supabase.from("students").update({
+            email_status: receipt.simulated ? "failed" : "sent",
+            email_error: receipt.simulated ? "SMTP simulation only; no email was submitted." : trackingWarning
+          }).eq("id", student.id);
         } catch (e: any) {
           const errMsg = e?.message || String(e);
           const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
@@ -624,10 +677,10 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
             email_status: "failed",
             email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
           }).eq("id", student.id);
-          await supabase.from("email_log").update({
-            status: "failed",
-            error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
-          }).eq("student_id", student.id);
+          await recordEmailDeliveryAttempt(
+            supabase,
+            failedDeliveryAttemptArgs(student.id, e, emailHtml, qrDataUrl)
+          );
         }
       }
     }
@@ -663,6 +716,9 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
   if (!Array.isArray(students) || !eventId) {
     return res.status(400).json({ success: false, message: "Invalid payload: students array and eventId required" });
   }
+  if (!skipEmails && students.length > 5) {
+    return res.status(400).json({ success: false, message: "Send-enabled imports are limited to 5 students per request." });
+  }
 
   // Fetch Event Settings
   const { data: eventInfo } = await supabase
@@ -671,38 +727,125 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
     .eq("id", eventId)
     .single();
 
-  const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+  const eventName = eventInfo?.name || "CCIS Lead Forward 2026";
   const eventDate = eventInfo?.event_date || "October 24, 2026";
   const eventVenue = eventInfo?.venue || "UMak Grand Theater";
   const eventDesc = eventInfo?.description || "";
 
   let insertedCount = 0;
-  const emailPromises: Promise<any>[] = [];
+  let updatedCount = 0;
 
   for (const s of students) {
-    const { full_name, email, college } = s;
-    if (!full_name || !email || !college) continue;
-
-    const trimmedEmail = email.trim();
+    const fullName = String(s.full_name || "").trim();
+    const trimmedEmail = String(s.email || "").trim();
+    const college = String(s.college || "").trim();
+    const program = String(s.program || "").trim();
+    const section = String(s.section || "").trim();
+    if (!fullName || !trimmedEmail || !college || !program || !section) continue;
 
     try {
       const { data: existing } = await supabase
         .from("students")
         .select("id")
         .eq("event_id", eventId)
-        .eq("email", trimmedEmail)
+        .ilike("email", trimmedEmail)
         .maybeSingle();
 
-      if (existing) continue;
+      if (existing) {
+        const { error: updateError } = await supabase
+          .from("students")
+          .update({
+            full_name: fullName,
+            email: trimmedEmail,
+            college,
+            program,
+            section
+          })
+          .eq("id", existing.id);
+
+        if (updateError) throw updateError;
+
+        const { data: existingEmailLog } = await supabase
+          .from("email_log")
+          .select("qr_data_url")
+          .eq("student_id", existing.id)
+          .maybeSingle();
+
+        if (existingEmailLog?.qr_data_url) {
+          const refreshedEmailHtml = generateEmailTemplate(
+            fullName,
+            college,
+            eventName,
+            eventDate,
+            eventVenue,
+            existingEmailLog.qr_data_url,
+            eventDesc,
+            program,
+            section
+          );
+          await supabase
+            .from("email_log")
+            .update({ email_html: refreshedEmailHtml })
+            .eq("student_id", existing.id);
+
+          if (!skipEmails) {
+            if (isEmailQuotaExceeded()) {
+              const quotaMessage = "Daily user sending limit exceeded (550 5.4.5)";
+              await supabase.from("students")
+                .update({ email_status: "failed", email_error: quotaMessage })
+                .eq("id", existing.id);
+              await recordEmailDeliveryAttempt(
+                supabase,
+                failedDeliveryAttemptArgs(existing.id, new Error(quotaMessage), refreshedEmailHtml, existingEmailLog.qr_data_url)
+              );
+            } else {
+              try {
+                const receipt = await sendEmail(
+                  trimmedEmail,
+                  `Your Updated Ticket for ${eventName}`,
+                  refreshedEmailHtml,
+                  existingEmailLog.qr_data_url
+                );
+                const trackingWarning = await recordEmailDeliveryAttempt(
+                  supabase,
+                  successfulDeliveryAttemptArgs(existing.id, receipt, refreshedEmailHtml, existingEmailLog.qr_data_url)
+                );
+                await supabase.from("students")
+                  .update({
+                    email_status: receipt.simulated ? "failed" : "sent",
+                    email_error: receipt.simulated ? "SMTP simulation only; no email was submitted." : trackingWarning
+                  })
+                  .eq("id", existing.id);
+              } catch (e: any) {
+                const errMsg = e?.message || String(e);
+                const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+                const deliveryError = isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg;
+                await supabase.from("students")
+                  .update({ email_status: "failed", email_error: deliveryError })
+                  .eq("id", existing.id);
+                await recordEmailDeliveryAttempt(
+                  supabase,
+                  failedDeliveryAttemptArgs(existing.id, e, refreshedEmailHtml, existingEmailLog.qr_data_url)
+                );
+              }
+            }
+          }
+        }
+
+        updatedCount++;
+        continue;
+      }
 
       const formResponseId = `csv_import_${crypto.randomBytes(4).toString("hex")}_${Date.now()}`;
       const { data: student, error: insError } = await supabase
         .from("students")
         .insert({
           event_id: eventId,
-          full_name,
+          full_name: fullName,
           email: trimmedEmail,
           college,
+          program,
+          section,
           form_response_id: formResponseId,
           email_status: "failed",
           email_error: "queued"
@@ -731,7 +874,17 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
       });
 
       const qrDataUrl = await QRCode.toDataURL(signedToken, { margin: 1, scale: 6 });
-      const emailHtml = generateEmailTemplate(full_name, college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+      const emailHtml = generateEmailTemplate(
+        fullName,
+        college,
+        eventName,
+        eventDate,
+        eventVenue,
+        qrDataUrl,
+        eventDesc,
+        program,
+        section
+      );
 
       await supabase.from("email_log").insert({
         student_id: student.id,
@@ -743,13 +896,23 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 
       if (!skipEmails) {
         if (isEmailQuotaExceeded()) {
-          await supabase.from("students").update({ email_status: "failed", email_error: "Daily user sending limit exceeded (550 5.4.5)" }).eq("id", student.id);
-          await supabase.from("email_log").update({ status: "failed", error_message: "Daily user sending limit exceeded (550 5.4.5)" }).eq("student_id", student.id);
+          const quotaError = new Error("Daily user sending limit exceeded (550 5.4.5)");
+          await supabase.from("students").update({ email_status: "failed", email_error: quotaError.message }).eq("id", student.id);
+          await recordEmailDeliveryAttempt(
+            supabase,
+            failedDeliveryAttemptArgs(student.id, quotaError, emailHtml, qrDataUrl)
+          );
         } else {
           try {
-            await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
-            await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-            await supabase.from("email_log").update({ status: "sent", error_message: null }).eq("student_id", student.id);
+            const receipt = await sendEmail(trimmedEmail, `Your Ticket for ${eventName}`, emailHtml, qrDataUrl);
+            const trackingWarning = await recordEmailDeliveryAttempt(
+              supabase,
+              successfulDeliveryAttemptArgs(student.id, receipt, emailHtml, qrDataUrl)
+            );
+            await supabase.from("students").update({
+              email_status: receipt.simulated ? "failed" : "sent",
+              email_error: receipt.simulated ? "SMTP simulation only; no email was submitted." : trackingWarning
+            }).eq("id", student.id);
           } catch (e: any) {
             const errMsg = e?.message || String(e);
             const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
@@ -757,10 +920,10 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
               email_status: "failed",
               email_error: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
             }).eq("id", student.id);
-            await supabase.from("email_log").update({
-              status: "failed",
-              error_message: isQuota ? "Daily user sending limit exceeded (550 5.4.5)" : errMsg
-            }).eq("student_id", student.id);
+            await recordEmailDeliveryAttempt(
+              supabase,
+              failedDeliveryAttemptArgs(student.id, e, emailHtml, qrDataUrl)
+            );
           }
         }
       }
@@ -773,58 +936,34 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 
   notifyClients("bulk_sync", {});
 
-  return res.json({ success: true, insertedCount });
+  return res.json({ success: true, insertedCount, updatedCount });
 });
 
 router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken, requireAdmin, async (req, res) => {
-  const { eventId, target } = req.body;
-  if (!eventId) {
-    return res.status(400).json({ success: false, message: "eventId is required" });
+  const { eventId, studentIds } = req.body;
+  if (!eventId || !Array.isArray(studentIds) || studentIds.length === 0) {
+    return res.status(400).json({ success: false, message: "eventId and a non-empty studentIds array are required." });
+  }
+  if (studentIds.length > 5 || studentIds.some(id => typeof id !== "string")) {
+    return res.status(400).json({ success: false, message: "Each delivery batch must contain between 1 and 5 valid student IDs." });
   }
 
   try {
-    let failedStudents = [];
+    const uniqueStudentIds = Array.from(new Set(studentIds)) as string[];
+    const { data: studentsList, error: stdError } = await supabase
+      .from("students")
+      .select("*")
+      .eq("event_id", eventId)
+      .in("id", uniqueStudentIds);
+    if (stdError) throw stdError;
 
-    if (target === "not_attended") {
-      const { data: unattendedAttendance, error: attError } = await supabase
-        .from("attendance")
-        .select("student_id")
-        .eq("event_id", eventId)
-        .is("scanned_at", null);
+    const studentsById = new Map((studentsList || []).map(student => [student.id, student]));
+    const studentsToProcess = uniqueStudentIds
+      .map(studentId => studentsById.get(studentId))
+      .filter(Boolean) as any[];
 
-      if (attError) throw attError;
-
-      if (unattendedAttendance && unattendedAttendance.length > 0) {
-        const studentIds = unattendedAttendance.map(a => a.student_id);
-        const chunkedStudents: any[] = [];
-        const chunkSize = 100;
-        for (let i = 0; i < studentIds.length; i += chunkSize) {
-          const chunkIds = studentIds.slice(i, i + chunkSize);
-          const { data: studentsList, error: stdError } = await supabase
-            .from("students")
-            .select("*")
-            .in("id", chunkIds);
-
-          if (stdError) throw stdError;
-          if (studentsList) {
-            chunkedStudents.push(...studentsList);
-          }
-        }
-        failedStudents = chunkedStudents;
-      }
-    } else {
-      const { data: studentsList, error: stdError } = await supabase
-        .from("students")
-        .select("*")
-        .eq("event_id", eventId)
-        .eq("email_status", "failed");
-
-      if (stdError) throw stdError;
-      failedStudents = studentsList || [];
-    }
-
-    if (!failedStudents || failedStudents.length === 0) {
-      return res.json({ success: true, count: 0, message: "No matching students found to resend." });
+    if (studentsToProcess.length === 0) {
+      return res.status(404).json({ success: false, message: "No matching students were found for this event." });
     }
 
     const { data: eventInfo } = await supabase
@@ -833,96 +972,111 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
       .eq("id", eventId)
       .single();
 
-    const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+    const eventName = eventInfo?.name || "CCIS Lead Forward 2026";
     const eventDate = eventInfo?.event_date || "October 24, 2026";
     const eventVenue = eventInfo?.venue || "UMak Grand Theater";
     const eventDesc = eventInfo?.description || "";
 
-    const studentIds = failedStudents.map(s => s.id);
-    const chunkSize = 100;
-    for (let i = 0; i < studentIds.length; i += chunkSize) {
-      const chunkIds = studentIds.slice(i, i + chunkSize);
-      await supabase.from("students")
-        .update({ email_status: "failed", email_error: "queued" })
-        .in("id", chunkIds);
-    }
+    const results: Array<{ studentId: string; status: "smtp_accepted" | "failed" | "simulated"; messageId?: string | null; error?: string }> = [];
+    let quotaExceeded = false;
 
-    // Process background resend sequentially to honor rate limit and circuit breaker
-    (async () => {
-      let sentCount = 0;
-
-      for (const student of failedStudents) {
-        if (isEmailQuotaExceeded()) {
-          await supabase.from("students").update({
-            email_status: "failed",
-            email_error: "Daily user sending limit exceeded (550 5.4.5)"
-          }).eq("id", student.id);
-          continue;
-        }
-
-        try {
-          let { data: tokenRecord } = await supabase
-            .from("qr_tokens")
-            .select("token")
-            .eq("student_id", student.id)
-            .maybeSingle();
-
-          if (!tokenRecord) {
-            const nonce = crypto.randomBytes(8).toString("hex");
-            const payload = `${student.id}:${eventId}:${nonce}`;
-            const hmac = crypto.createHmac("sha256", QR_SECRET).update(payload).digest("hex");
-            const signedToken = `${payload}:${hmac}`;
-
-            await supabase.from("qr_tokens").insert({
-              student_id: student.id,
-              event_id: eventId,
-              token: signedToken
-            });
-            tokenRecord = { token: signedToken };
-          }
-
-          const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
-          const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
-
-          await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
-
-          await supabase.from("email_log")
-            .upsert({
-              student_id: student.id,
-              status: "sent",
-              error_message: null,
-              email_html: emailHtml,
-              qr_data_url: qrDataUrl,
-              sent_at: new Date().toISOString()
-            }, { onConflict: "student_id" });
-
-          await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", student.id);
-          sentCount++;
-        } catch (err: any) {
-          const errMsg = err?.message || String(err);
-          const isQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
-          console.error(`Failed to resend email for ${student.email}:`, errMsg);
-          try {
-            await supabase.from("students").update({
-              email_status: "failed",
-              email_error: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
-            }).eq("id", student.id);
-            await supabase.from("email_log").update({
-              status: "failed",
-              error_message: isQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg
-            }).eq("student_id", student.id);
-          } catch {}
-
-          if (isQuota) {
-            console.error(`[BULK RESEND HALTED] Gmail sending limit reached after sending ${sentCount} emails.`);
-          }
-        }
+    for (const student of studentsToProcess) {
+      if (isEmailQuotaExceeded()) {
+        quotaExceeded = true;
+        break;
       }
 
-      notifyClients("bulk_sync", {});
-    })();
+      let emailHtml = "";
+      let qrDataUrl = "";
+      try {
+        await supabase.from("students").update({ email_status: "failed", email_error: "sending" }).eq("id", student.id);
 
-    return res.json({ success: true, count: failedStudents.length });
+        let { data: tokenRecord } = await supabase
+          .from("qr_tokens")
+          .select("token")
+          .eq("student_id", student.id)
+          .maybeSingle();
+
+        if (!tokenRecord) {
+          const nonce = crypto.randomBytes(8).toString("hex");
+          const payload = `${student.id}:${eventId}:${nonce}`;
+          const hmac = crypto.createHmac("sha256", QR_SECRET).update(payload).digest("hex");
+          const signedToken = `${payload}:${hmac}`;
+          const { error: tokenError } = await supabase.from("qr_tokens").insert({
+            student_id: student.id,
+            event_id: eventId,
+            token: signedToken
+          });
+          if (tokenError) throw tokenError;
+          tokenRecord = { token: signedToken };
+        }
+
+        qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
+        emailHtml = generateEmailTemplate(
+          student.full_name,
+          student.college,
+          eventName,
+          eventDate,
+          eventVenue,
+          qrDataUrl,
+          eventDesc,
+          student.program,
+          student.section
+        );
+
+        const receipt = await sendEmail(student.email, `Your Event Ticket for ${eventName}`, emailHtml, qrDataUrl);
+        const trackingWarning = await recordEmailDeliveryAttempt(
+          supabase,
+          successfulDeliveryAttemptArgs(student.id, receipt, emailHtml, qrDataUrl)
+        );
+        const studentError = receipt.simulated ? "SMTP simulation only; no email was submitted." : trackingWarning;
+        await supabase.from("students").update({
+          email_status: receipt.simulated ? "failed" : "sent",
+          email_error: studentError
+        }).eq("id", student.id);
+
+        results.push({
+          studentId: student.id,
+          status: receipt.simulated ? "simulated" : "smtp_accepted",
+          messageId: receipt.messageId
+        });
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        const hitQuota = isEmailQuotaExceeded() || errMsg.includes("550") || errMsg.includes("Limit Exceeded");
+        const deliveryError = hitQuota ? "Daily sending limit exceeded (550 5.4.5)" : errMsg;
+        if (emailHtml && qrDataUrl) {
+          await recordEmailDeliveryAttempt(
+            supabase,
+            failedDeliveryAttemptArgs(student.id, err, emailHtml, qrDataUrl)
+          );
+        }
+        await supabase.from("students").update({ email_status: "failed", email_error: deliveryError }).eq("id", student.id);
+        results.push({ studentId: student.id, status: "failed", error: deliveryError });
+        if (hitQuota) {
+          quotaExceeded = true;
+          break;
+        }
+      }
+    }
+
+    notifyClients("bulk_sync", {});
+    const acceptedCount = results.filter(result => result.status === "smtp_accepted").length;
+    const simulatedCount = results.filter(result => result.status === "simulated").length;
+    const failedCount = results.filter(result => result.status === "failed").length;
+
+    return res.json({
+      success: true,
+      count: results.length,
+      requestedCount: studentsToProcess.length,
+      acceptedCount,
+      failedCount,
+      simulatedCount,
+      quotaExceeded,
+      results,
+      message: quotaExceeded
+        ? "Dispatch stopped because the sending provider quota was reached."
+        : "Batch completed. SMTP acceptance does not guarantee inbox delivery."
+    });
   } catch (err: any) {
     console.error("Bulk resend error:", err);
     return res.status(500).json({ success: false, message: err.message || "Failed to trigger bulk resend." });
@@ -931,6 +1085,8 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
 
 router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requireAdmin, async (req, res) => {
   const studentId = req.params.id || (req.query.studentId as string) || req.body.studentId;
+  let emailHtml = "";
+  let qrDataUrl = "";
 
   try {
     const { data: student, error: stdError } = await supabase
@@ -959,48 +1115,61 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
       .eq("id", student.event_id)
       .single();
 
-    const eventName = eventInfo?.name || "Vibrant Event Tech Summit 2026";
+    const eventName = eventInfo?.name || "CCIS Lead Forward 2026";
     const eventDate = eventInfo?.event_date || "October 24, 2026";
     const eventVenue = eventInfo?.venue || "UMak Grand Theater";
     const eventDesc = eventInfo?.description || "";
 
-    const qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
-    const emailHtml = generateEmailTemplate(student.full_name, student.college, eventName, eventDate, eventVenue, qrDataUrl, eventDesc);
+    qrDataUrl = await QRCode.toDataURL(tokenRecord.token, { margin: 1, scale: 6 });
+    emailHtml = generateEmailTemplate(
+      student.full_name,
+      student.college,
+      eventName,
+      eventDate,
+      eventVenue,
+      qrDataUrl,
+      eventDesc,
+      student.program,
+      student.section
+    );
 
-    // Send email via Nodemailer SMTP
-    await sendEmail(student.email, `Your Resent Ticket for ${eventName}`, emailHtml, qrDataUrl);
+    const receipt = await sendEmail(student.email, `Your Event Ticket for ${eventName}`, emailHtml, qrDataUrl);
+    const trackingWarning = await recordEmailDeliveryAttempt(
+      supabase,
+      successfulDeliveryAttemptArgs(studentId, receipt, emailHtml, qrDataUrl)
+    );
+    const studentError = receipt.simulated ? "SMTP simulation only; no email was submitted." : trackingWarning;
 
-    // Update Email Log
-    await supabase.from("email_log")
-      .upsert({
-        student_id: studentId,
-        status: "sent",
-        error_message: null,
-        email_html: emailHtml,
-        qr_data_url: qrDataUrl,
-        sent_at: new Date().toISOString()
-      }, { onConflict: "student_id" });
-
-    await supabase.from("students").update({ email_status: "sent", email_error: null }).eq("id", studentId);
+    await supabase.from("students").update({
+      email_status: receipt.simulated ? "failed" : "sent",
+      email_error: studentError
+    }).eq("id", studentId);
 
     notifyClients("student_updated", {
       student: {
         id: studentId,
-        email_status: "sent",
-        email_error: null
+        email_status: receipt.simulated ? "failed" : "sent",
+        email_error: studentError
       }
     });
 
-    return res.json({ success: true });
+    return res.json({
+      success: !receipt.simulated,
+      message: receipt.simulated
+        ? studentError
+        : trackingWarning || "Message accepted by the SMTP provider; inbox delivery is not guaranteed.",
+      deliveryStatus: receipt.simulated ? "simulated" : "smtp_accepted",
+      messageId: receipt.messageId
+    });
   } catch (err: any) {
     console.error("Resend error:", err);
     await supabase.from("students").update({ email_status: "failed", email_error: err.message }).eq("id", studentId);
-    await supabase.from("email_log").upsert({
-      student_id: studentId,
-      status: "failed",
-      error_message: err.message,
-      sent_at: new Date().toISOString()
-    }, { onConflict: "student_id" });
+    if (emailHtml && qrDataUrl) {
+      await recordEmailDeliveryAttempt(
+        supabase,
+        failedDeliveryAttemptArgs(studentId, err, emailHtml, qrDataUrl)
+      );
+    }
 
     notifyClients("student_updated", {
       student: {
@@ -1058,14 +1227,22 @@ router.post("/api/reset-emails", authenticateToken, requireAdmin, async (req, re
         
         const { error: updateErr } = await supabase
           .from("students")
-          .update({ email_status: "failed", email_error: null })
+          .update({ email_status: "failed", email_error: "queued" })
           .in("id", chunkIds);
 
         if (updateErr) throw updateErr;
 
         const { error: logErr } = await supabase
           .from("email_log")
-          .update({ status: "failed", error_message: "queued" })
+          .update({
+            status: "failed",
+            error_message: "queued",
+            delivery_status: "queued",
+            provider_message_id: null,
+            provider_response: null,
+            accepted_recipients: [],
+            rejected_recipients: []
+          })
           .in("student_id", chunkIds);
 
         if (logErr) throw logErr;
@@ -1165,7 +1342,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
 
   // Parse signature payload
   const parts = token.split(":");
-  if (parts.length < 4) {
+  if (parts.length !== 4) {
     return res.status(400).json({ success: false, message: "Malformed entry signature token" });
   }
 
@@ -1182,7 +1359,12 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
   const payload = `${studentId}:${tokenEventId}:${nonce}`;
   const expectedSignature = crypto.createHmac("sha256", QR_SECRET).update(payload).digest("hex");
 
-  if (signature !== expectedSignature) {
+  const signatureBuffer = /^[a-f0-9]{64}$/i.test(signature) ? Buffer.from(signature, "hex") : Buffer.alloc(0);
+  const expectedBuffer = Buffer.from(expectedSignature, "hex");
+  if (
+    signatureBuffer.length !== expectedBuffer.length
+    || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
     return res.json({ status: "FAKE", message: "Fake or forged QR signature detected." });
   }
 
@@ -1214,7 +1396,9 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
         student: {
           full_name: scanResult.student_name,
           email: scanResult.student_email,
-          college: scanResult.student_college
+          college: scanResult.student_college,
+          program: scanResult.student_program,
+          section: scanResult.student_section
         },
         scanned_at: scanResult.scanned_at,
         scanned_by_name: scanResult.scanned_by_name,
@@ -1226,7 +1410,9 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
         student: {
           full_name: scanResult.student_name,
           email: scanResult.student_email,
-          college: scanResult.student_college
+          college: scanResult.student_college,
+          program: scanResult.student_program,
+          section: scanResult.student_section
         },
         scanned_at: scanResult.scanned_at,
         original_time: scanResult.original_time,
@@ -1251,7 +1437,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
   try {
     const { data: students, error } = await supabase
       .from("students")
-      .select("*, attendance(scanned_at, scanned_by)")
+      .select("*, attendance(scanned_at, scanned_by), email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)")
       .eq("event_id", eventId);
 
     if (error) throw error;
@@ -1259,10 +1445,11 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
     const { data: scanners } = await supabase.from("committee_users").select("id, committee_name");
     const scannerMap = new Map(scanners?.map(s => [s.id, s.committee_name]) || []);
 
-    let csv = "Email,Name,College,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
 
     for (const student of (students || [])) {
-      const att = student.attendance;
+      const att = Array.isArray(student.attendance) ? student.attendance[0] : student.attendance;
+      const emailLog = Array.isArray(student.email_log) ? student.email_log[0] : student.email_log;
       const isAttended = att && att.scanned_at ? "Yes" : "No";
 
       let scannedTime = "--:--";
@@ -1274,10 +1461,17 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
       }
 
       const escapedName = student.full_name.replace(/"/g, '""');
+      const escapedEmail = student.email.replace(/"/g, '""');
       const escapedCollege = student.college.replace(/"/g, '""');
+      const escapedProgram = (student.program || "").replace(/"/g, '""');
+      const escapedSection = (student.section || "").replace(/"/g, '""');
+      const deliveryStatus = emailLog?.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
+      const escapedMessageId = (emailLog?.provider_message_id || "").replace(/"/g, '""');
+      const escapedProviderResponse = (emailLog?.provider_response || "").replace(/"/g, '""');
+      const lastAttempt = emailLog?.last_attempt_at ? new Date(emailLog.last_attempt_at).toISOString() : "";
       const escapedScanner = scannerName.replace(/"/g, '""');
 
-      csv += `"${student.email}","${escapedName}","${escapedCollege}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");

@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { AuthState, Student, Event } from "./types";
 import LoginScreen from "./components/LoginScreen";
 import EventsMenu from "./components/EventsMenu";
 import AdminPanel from "./components/AdminPanel";
 import ScannerPanel from "./components/ScannerPanel";
 import { ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
-import { supabase } from "./lib/supabase";
 import { logoutUser, sendHeartbeat } from "./lib/auth";
 import { fetchStudents } from "./lib/api";
 
@@ -20,24 +19,25 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [loadingRegistry, setLoadingRegistry] = useState(false);
-  const [activeSessionCount, setActiveSessionCount] = useState(0);
   const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
 
   // Fetch full student list scoped by selected event
-  const loadStudents = async (tokenOverride?: string, eventIdOverride?: string) => {
+  const loadStudents = useCallback(async (tokenOverride?: string, eventIdOverride?: string) => {
     const tokenToUse = tokenOverride || auth.token;
     const eventIdToUse = eventIdOverride || selectedEvent?.id;
-    if (!tokenToUse || !eventIdToUse) return;
+    if (!tokenToUse || !eventIdToUse) return false;
     setLoadingRegistry(true);
     try {
       const students = await fetchStudents(tokenToUse, eventIdToUse);
       setStudents(students);
+      return true;
     } catch (e) {
       console.error("Failed to fetch students:", e);
+      return false;
     } finally {
       setLoadingRegistry(false);
     }
-  };
+  }, [auth.token, selectedEvent?.id]);
 
   // Check existing session on load
   useEffect(() => {
@@ -59,58 +59,53 @@ export default function App() {
     }
   }, []);
 
-  // 1. Establish Supabase Realtime connection for real-time reactivity
+  // Keep the registry fresh through authenticated API polling. This avoids
+  // shipping any privileged Supabase key in the browser bundle.
   useEffect(() => {
-    if (!auth.isAuthenticated || !auth.token) {
+    if (!auth.isAuthenticated || !auth.token || !selectedEvent?.id) {
       setSseStatus("disconnected");
       return;
     }
 
+    let active = true;
     setSseStatus("connecting");
 
-    const channel = supabase
-      .channel("realtime-updates")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "students" }, () => {
-        loadStudents();
-        setSseStatus("connected");
-      })
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "students" }, (payload) => {
-        setStudents((prev) => prev.filter((s) => s.id !== payload.old.id));
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "students" }, () => {
-        loadStudents();
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "attendance" }, () => {
-        loadStudents();
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "attendance" }, () => {
-        loadStudents();
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") setSseStatus("connected");
-        if (status === "CLOSED" || status === "CHANNEL_ERROR") setSseStatus("disconnected");
-      });
+    const syncRegistry = async () => {
+      const connected = await loadStudents();
+      if (active) setSseStatus(connected ? "connected" : "disconnected");
+    };
+
+    void syncRegistry();
+    const pollingInterval = window.setInterval(() => void syncRegistry(), 5000);
 
     return () => {
-      supabase.removeChannel(channel);
+      active = false;
+      window.clearInterval(pollingInterval);
     };
-  }, [auth.isAuthenticated, auth.token, selectedEvent]);
+  }, [auth.isAuthenticated, auth.token, selectedEvent?.id, loadStudents]);
 
-  // 2. Heartbeat monitoring via Supabase direct update
+  // Validate immediately, then keep the custom scanner session alive.
   useEffect(() => {
     if (!auth.isAuthenticated || !auth.token) return;
 
-    const heartbeatInterval = setInterval(async () => {
+    let active = true;
+    const runHeartbeat = async () => {
       const alive = await sendHeartbeat(auth.token!);
-      if (!alive) {
+      if (active && !alive) {
         handleLogout();
         const roleMsg = auth.role === "admin" ? "administrator" : "scanner";
         alert(`Your ${roleMsg} session has timed out or been superseded by another operator. Please sign in again.`);
       }
-    }, 15000);
+    };
 
-    return () => clearInterval(heartbeatInterval);
-  }, [auth]);
+    void runHeartbeat();
+    const heartbeatInterval = window.setInterval(() => void runHeartbeat(), 15000);
+
+    return () => {
+      active = false;
+      window.clearInterval(heartbeatInterval);
+    };
+  }, [auth.isAuthenticated, auth.token, auth.role]);
 
   const handleLoginSuccess = (newAuth: AuthState) => {
     setAuth(newAuth);
@@ -194,7 +189,7 @@ export default function App() {
               <div className="h-8 w-[1px] bg-brand-text/20 hidden md:block"></div>
 
               <div className="flex items-center gap-3">
-                {/* Realtime Stream Indicators */}
+                {/* Authenticated registry-sync indicator */}
                 <div className="flex items-center gap-2 bg-brand-primary-dark/80 px-3 py-1.5 rounded-full border border-brand-text/10 font-mono text-[10px] shadow-inner font-bold">
                   <span className={`w-2.5 h-2.5 rounded-full ${
                     sseStatus === "connected" 

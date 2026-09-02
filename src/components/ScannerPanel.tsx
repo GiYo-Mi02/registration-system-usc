@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Camera, 
   AlertTriangle, 
@@ -9,9 +9,13 @@ import {
   ShieldCheck,
   UserCheck,
   X,
-  Terminal
+  Terminal,
+  CameraOff,
+  RefreshCw,
+  SwitchCamera,
+  ImagePlus
 } from "lucide-react";
-import { Html5Qrcode } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { AuthState, Event } from "../types";
 import { verifyScan } from "../lib/api";
 
@@ -36,6 +40,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
+  const [activeFacingMode, setActiveFacingMode] = useState<"environment" | "user">("environment");
 
   const lastScannedTokenRef = useRef<string>("");
   const lastScannedTimestampRef = useRef<number>(0);
@@ -60,6 +65,8 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       full_name: string;
       email: string;
       college: string;
+      program?: string | null;
+      section?: string | null;
     };
     message?: string;
     original_time?: string;
@@ -68,6 +75,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
   } | null>(null);
 
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+  const cameraOperationRef = useRef(false);
   const scannerId = "camera-viewfinder";
   const resultRef = useRef<HTMLDivElement | null>(null);
 
@@ -78,107 +86,153 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     }
   }, [scanState]);
 
-  // Handle active webcam scanner initialization & cleanups
-  useEffect(() => {
-    let active = true;
-
-    const initCameras = async () => {
-      try {
-        const devices = await Html5Qrcode.getCameras();
-        if (!active) return;
-
-        if (devices && devices.length > 0) {
-          setCameras(devices);
-          // Look for a back/rear camera to select as default
-          const backCamera = devices.find(d => {
-            const label = d.label.toLowerCase();
-            return label.includes("back") || 
-                   label.includes("rear") || 
-                   label.includes("environment") || 
-                   label.includes("main");
-          });
-          const defaultId = backCamera ? backCamera.id : devices[0].id;
-          setSelectedCameraId(defaultId);
-          await startWebcamScanner(defaultId);
-        } else {
-          await startWebcamScanner(null);
-        }
-      } catch (err) {
-        console.warn("Unable to enumerate cameras, falling back to facingMode", err);
-        if (!active) return;
-        await startWebcamScanner(null);
-      }
-    };
-
-    initCameras();
-
-    return () => {
-      active = false;
-      stopWebcamScanner();
-    };
+  const refreshCameras = useCallback(async (preferredDeviceId?: string) => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const devices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(device => device.kind === "videoinput" && device.deviceId)
+        .map((device, index) => ({
+          id: device.deviceId,
+          label: device.label || `Camera ${index + 1}`
+        }));
+      setCameras(devices);
+      setSelectedCameraId(current => {
+        if (current && devices.some(device => device.id === current)) return current;
+        if (preferredDeviceId && devices.some(device => device.id === preferredDeviceId)) return preferredDeviceId;
+        return devices[0]?.id || "";
+      });
+    } catch (error) {
+      console.warn("Unable to refresh camera list:", error);
+    }
   }, []);
 
-  const startWebcamScanner = async (cameraIdToUse?: string | null) => {
-    setCameraError(null);
-    setScannerStatus("scanning");
-    try {
-      // Ensure existing is stopped
-      await stopWebcamScanner();
-
-      const scannerInstance = new Html5Qrcode(scannerId, {
-        verbose: false,
-        useBarCodeDetectorIfSupported: true
-      });
-      html5QrcodeRef.current = scannerInstance;
-
-      const cameraTarget = cameraIdToUse || { facingMode: "environment" };
-
-      await scannerInstance.start(
-        cameraTarget,
-        {
-          fps: 20,
-          qrbox: (width, height) => {
-            const size = Math.min(width, height) * 0.75;
-            return { width: size, height: size };
-          }
-        },
-        (decodedText) => {
-          // Ignore frames if we are currently verifying a token or displaying a result
-          if (isValidatingRef.current || scanStateRef.current !== "idle") {
-            return;
-          }
-          // Success callback - keep camera running, process scan with local cooldown block
-          const now = Date.now();
-          if (decodedText === lastScannedTokenRef.current && (now - lastScannedTimestampRef.current) < 3000) {
-            return;
-          }
-          lastScannedTokenRef.current = decodedText;
-          lastScannedTimestampRef.current = now;
-          handleVerifyToken(decodedText);
-        },
-        (errorMessage) => {
-          // Keep scanner scanning, silent check
-        }
-      );
-    } catch (err: any) {
-      console.error("Webcam startup error:", err);
-      setScannerStatus("error");
-      setCameraError(
-        err.message || 
-        "Webcam access is locked or blocked. Make sure your browser has granted camera frame permissions or use the high-fidelity simulator below."
-      );
-    }
-  };
-
-  const stopWebcamScanner = async () => {
-    if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
+  const stopWebcamScanner = async (updateStatus = true) => {
+    const scanner = html5QrcodeRef.current;
+    html5QrcodeRef.current = null;
+    if (scanner) {
       try {
-        await html5QrcodeRef.current.stop();
-      } catch (e) {
-        console.error("Error stopping camera", e);
+        if (scanner.isScanning) await scanner.stop();
+      } catch (error) {
+        console.warn("Error stopping camera:", error);
+      }
+      try {
+        scanner.clear();
+      } catch {
+        // The viewfinder may already have been cleared by a failed start.
       }
     }
-    setScannerStatus("idle");
+    if (updateStatus) setScannerStatus("idle");
+  };
+
+  const cameraErrorMessage = (error: unknown) => {
+    const raw = String((error as { message?: unknown })?.message || error || "");
+    const normalized = raw.toLowerCase();
+    if (!window.isSecureContext) {
+      return "Camera access requires HTTPS. Open the production HTTPS address directly in Safari.";
+    }
+    if (normalized.includes("notallowed") || normalized.includes("permission") || normalized.includes("denied")) {
+      return "Camera permission is blocked. On iPhone, open Settings → Safari → Camera, choose Allow, return here, and tap Start Rear Camera again.";
+    }
+    if (normalized.includes("notfound") || normalized.includes("requested device not found")) {
+      return "No usable camera was found. Confirm the device has a camera and try Switch Camera or QR Image.";
+    }
+    if (normalized.includes("notreadable") || normalized.includes("trackstart") || normalized.includes("could not start")) {
+      return "The camera is busy. Close Camera, FaceTime, or other scanner tabs, then retry.";
+    }
+    return raw || "The camera could not start. Retry with the rear camera, switch cameras, or scan a QR image.";
+  };
+
+  const startWebcamScanner = async (requestedTarget: string | "environment" | "user" = "environment") => {
+    if (cameraOperationRef.current) return;
+    cameraOperationRef.current = true;
+    setCameraError(null);
+    setScannerStatus("scanning");
+
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Secure camera APIs are unavailable in this browser.");
+      }
+
+      await stopWebcamScanner(false);
+      const isDeviceId = requestedTarget !== "environment" && requestedTarget !== "user";
+      const targets: Array<string | MediaTrackConstraints> = isDeviceId
+        ? [requestedTarget]
+        : [
+            { facingMode: { exact: requestedTarget } },
+            { facingMode: { ideal: requestedTarget } },
+            { facingMode: requestedTarget },
+            ...(requestedTarget === "environment" ? [{ facingMode: "user" as const }] : [])
+          ];
+
+      let scannerInstance: Html5Qrcode | null = null;
+      let lastError: unknown = null;
+
+      for (const target of targets) {
+        const candidate = new Html5Qrcode(scannerId, {
+          verbose: false,
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+          useBarCodeDetectorIfSupported: true
+        });
+        try {
+          await candidate.start(
+            target,
+            {
+              fps: 10,
+              disableFlip: false,
+              qrbox: (width, height) => {
+                const size = Math.floor(Math.min(width, height) * 0.72);
+                return { width: size, height: size };
+              }
+            },
+            (decodedText) => {
+              if (isValidatingRef.current || scanStateRef.current !== "idle") return;
+              const now = Date.now();
+              if (decodedText === lastScannedTokenRef.current && now - lastScannedTimestampRef.current < 3000) return;
+              lastScannedTokenRef.current = decodedText;
+              lastScannedTimestampRef.current = now;
+              void handleVerifyToken(decodedText);
+            },
+            () => {
+              // Failed frames are normal while the viewfinder is searching.
+            }
+          );
+          scannerInstance = candidate;
+          break;
+        } catch (error) {
+          lastError = error;
+          try {
+            if (candidate.isScanning) await candidate.stop();
+            candidate.clear();
+          } catch {
+            // Continue through the iOS-compatible fallback targets.
+          }
+        }
+      }
+
+      if (!scannerInstance) throw lastError || new Error("No compatible camera configuration succeeded.");
+      html5QrcodeRef.current = scannerInstance;
+
+      const video = document.querySelector<HTMLVideoElement>(`#${scannerId} video`);
+      if (video) {
+        video.muted = true;
+        video.setAttribute("muted", "true");
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("webkit-playsinline", "true");
+      }
+
+      const settings = scannerInstance.getRunningTrackSettings();
+      const facingMode = settings.facingMode === "user" ? "user" : "environment";
+      setActiveFacingMode(facingMode);
+      await refreshCameras(settings.deviceId);
+      setScannerStatus("scanning");
+    } catch (error) {
+      console.error("Webcam startup error:", error);
+      await stopWebcamScanner(false);
+      setScannerStatus("error");
+      setCameraError(cameraErrorMessage(error));
+    } finally {
+      cameraOperationRef.current = false;
+    }
   };
 
   const handleCameraChange = async (cameraId: string) => {
@@ -186,7 +240,25 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     await startWebcamScanner(cameraId);
   };
 
-  // Central Cryptographic verification router — calls Supabase RPC directly
+  const handleSwitchCamera = async () => {
+    await startWebcamScanner(activeFacingMode === "environment" ? "user" : "environment");
+  };
+
+  useEffect(() => {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setScannerStatus("error");
+      setCameraError("Camera access requires Safari or another modern browser over HTTPS.");
+    }
+
+    const handleDeviceChange = () => void refreshCameras();
+    navigator.mediaDevices?.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      navigator.mediaDevices?.removeEventListener?.("devicechange", handleDeviceChange);
+      void stopWebcamScanner(false);
+    };
+  }, [refreshCameras]);
+
+  // The server validates the committee session and QR signature before check-in.
   const handleVerifyToken = async (tokenStr: string) => {
     if (isValidatingRef.current || scanStateRef.current !== "idle") {
       return;
@@ -194,8 +266,8 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     isValidatingRef.current = true;
 
     try {
-      const scannedBy = auth.user?.id || "unknown";
-      const data = await verifyScan(tokenStr, scannedBy, selectedEvent.id);
+      if (!auth.token) throw new Error("Scanner session is missing. Please sign in again.");
+      const data = await verifyScan(tokenStr, selectedEvent.id, auth.token);
 
       if (data.status === "VALID") {
         updateScanState("valid");
@@ -230,7 +302,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       }
     } catch (e: any) {
       updateScanState("fake");
-      setScanResult({ message: "Network connection or signature validation failed." });
+      setScanResult({ message: e?.message || "Network connection or signature validation failed." });
       if (cooldownTimerRef.current) {
         clearTimeout(cooldownTimerRef.current);
       }
@@ -239,6 +311,39 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       }, 4000);
     } finally {
       isValidatingRef.current = false;
+    }
+  };
+
+  const handleQrImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || cameraOperationRef.current) return;
+
+    cameraOperationRef.current = true;
+    setCameraError(null);
+    try {
+      await stopWebcamScanner(false);
+      const fileScanner = new Html5Qrcode(scannerId, {
+        verbose: false,
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        useBarCodeDetectorIfSupported: true
+      });
+      html5QrcodeRef.current = fileScanner;
+      const decodedText = await fileScanner.scanFile(file, false);
+      fileScanner.clear();
+      html5QrcodeRef.current = null;
+      setScannerStatus("idle");
+      await handleVerifyToken(decodedText);
+    } catch (error) {
+      console.error("QR image scan failed:", error);
+      updateScanState("fake");
+      setScanResult({ message: "No readable registration QR code was found in that image." });
+      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = setTimeout(handleResetScanState, 4000);
+      await stopWebcamScanner(false);
+      setScannerStatus("idle");
+    } finally {
+      cameraOperationRef.current = false;
+      event.target.value = "";
     }
   };
 
@@ -272,7 +377,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
               </span>
             </div>
             <p className="text-xs text-brand-text/60 font-mono mt-0.5">
-              Operator: <span className="text-brand-text/90 font-semibold">@{auth.user?.username}</span> | System: SecurPass v1.1
+              Operator: <span className="text-brand-text/90 font-semibold">@{auth.user?.username}</span> | System: SecurPass v1.2
             </p>
           </div>
         </div>
@@ -308,6 +413,49 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                 Live Viewfinder
               </h3>
 
+              <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void startWebcamScanner("environment")}
+                  className="col-span-2 sm:col-span-1 px-3 py-2.5 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark rounded-xl text-[11px] font-bold tracking-wide uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  {scannerStatus === "scanning" ? "Restart Rear" : "Start Rear Camera"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSwitchCamera()}
+                  className="px-3 py-2.5 bg-brand-primary-dark hover:bg-brand-primary-light border border-brand-accent/20 text-brand-text rounded-xl text-[11px] font-semibold tracking-wide uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <SwitchCamera className="w-4 h-4" />
+                  Switch
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void stopWebcamScanner()}
+                  disabled={scannerStatus !== "scanning"}
+                  className="px-3 py-2.5 bg-brand-primary-dark hover:bg-red-950/40 disabled:opacity-40 disabled:cursor-not-allowed border border-brand-accent/20 text-brand-text rounded-xl text-[11px] font-semibold tracking-wide uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CameraOff className="w-4 h-4" />
+                  Stop
+                </button>
+                <label className="px-3 py-2.5 bg-brand-primary-dark hover:bg-brand-primary-light border border-brand-accent/20 text-brand-text rounded-xl text-[11px] font-semibold tracking-wide uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                  <ImagePlus className="w-4 h-4" />
+                  QR Image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleQrImage}
+                    className="sr-only"
+                    aria-label="Scan a QR code from an image"
+                  />
+                </label>
+              </div>
+
+              <p className="mb-4 text-[11px] text-brand-text/55 leading-relaxed">
+                On iPhone, tap <span className="text-brand-accent font-semibold">Start Rear Camera</span> first, then allow camera access. If Safari picked the front lens, tap Switch. QR Image is available as a fallback.
+              </p>
+
               {cameras.length > 1 && (
                 <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-2 bg-brand-primary-dark/50 p-3 rounded-2xl border border-brand-accent/10">
                   <label htmlFor="camera-select" className="text-xs font-mono text-brand-text/60 uppercase shrink-0">
@@ -316,7 +464,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                   <select
                     id="camera-select"
                     value={selectedCameraId}
-                    onChange={(e) => handleCameraChange(e.target.value)}
+                    onChange={(e) => void handleCameraChange(e.target.value)}
                     className="w-full bg-brand-primary-dark border border-brand-accent/20 rounded-xl px-3 py-2 text-xs text-brand-text focus:outline-none focus:border-brand-accent/60 transition-all cursor-pointer"
                   >
                     {cameras.map((camera) => (
@@ -328,8 +476,8 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                 </div>
               )}
 
-              {cameraError ? (
-                <div className="bg-red-950/40 border border-red-500/30 p-6 rounded-2xl text-center space-y-4">
+              {cameraError && (
+                <div className="mb-4 bg-red-950/40 border border-red-500/30 p-6 rounded-2xl text-center space-y-4">
                   <AlertTriangle className="w-12 h-12 text-red-400 mx-auto animate-bounce" />
                   <div>
                     <h4 className="font-semibold text-red-200 text-sm">Camera Stream Inhibited</h4>
@@ -338,14 +486,16 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                     </p>
                   </div>
                   <button
-                    onClick={startWebcamScanner}
+                    type="button"
+                    onClick={() => void startWebcamScanner("environment")}
                     className="px-4 py-2 bg-brand-primary-dark hover:bg-brand-primary-dark/80 text-brand-accent text-xs font-semibold tracking-wider uppercase rounded-xl border border-brand-accent/20 cursor-pointer"
                   >
-                    Retry Camera Hook
+                    Retry Rear Camera
                   </button>
                 </div>
-              ) : (
-                <div className={`relative aspect-square w-full max-w-xl mx-auto bg-black rounded-3xl overflow-hidden border-4 border-dashed transition-all duration-300 flex flex-col justify-center items-center ${
+              )}
+
+              <div className={`relative aspect-square w-full max-w-xl mx-auto bg-black rounded-3xl overflow-hidden border-4 border-dashed transition-all duration-300 flex flex-col justify-center items-center ${
                   scanState === "valid"
                     ? "border-emerald-500 ring-8 ring-emerald-500/20"
                     : scanState === "duplicate"
@@ -377,13 +527,23 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
                   <div id={scannerId} className="w-full h-full object-cover"></div>
 
+                  {scannerStatus !== "scanning" && (
+                    <button
+                      type="button"
+                      onClick={() => void startWebcamScanner("environment")}
+                      className="absolute z-20 px-5 py-3 bg-brand-accent hover:bg-brand-accent/90 text-brand-primary-dark font-bold text-xs tracking-wide uppercase rounded-xl shadow-xl cursor-pointer flex items-center gap-2"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Tap to Start Rear Camera
+                    </button>
+                  )}
+
                   {scannerStatus === "scanning" && (
                     <div className="absolute bottom-4 bg-brand-primary-dark/95 px-5 py-2 rounded-full text-[10px] sm:text-xs font-mono tracking-widest text-brand-accent border border-brand-accent/20 animate-pulse uppercase z-10">
-                      📹 Active Lens scanning...
+                      {activeFacingMode === "environment" ? "Rear" : "Front"} lens scanning...
                     </div>
                   )}
                 </div>
-              )}
 
               <div className="mt-4 text-center">
                 <p className="text-xs text-brand-text/50">
@@ -427,6 +587,13 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                         <p className="text-xs md:text-sm opacity-90 font-mono leading-normal">
                           College: <span className="text-white font-semibold">{scanResult?.student?.college}</span>
                         </p>
+                        {(scanResult?.student?.program || scanResult?.student?.section) && (
+                          <p className="text-xs md:text-sm opacity-90 font-mono leading-normal">
+                            Program / Section: <span className="text-white font-semibold">
+                              {[scanResult?.student?.program, scanResult?.student?.section].filter(Boolean).join(" / ")}
+                            </span>
+                          </p>
+                        )}
                         <p className="text-[10px] md:text-xs opacity-75 font-mono">
                           {scanState === "valid" 
                             ? `🕒 Checked In: ${scanResult?.time_string || "Just now"}`

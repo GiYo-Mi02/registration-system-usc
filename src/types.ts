@@ -3,10 +3,17 @@ export interface Student {
   full_name: string;
   email: string;
   college: string;
+  program: string | null;
+  section: string | null;
   form_response_id: string;
   imported_at: string;
   email_status: "sent" | "failed";
   email_error?: string;
+  delivery_status?: "queued" | "smtp_accepted" | "failed" | "simulated" | "legacy_sent" | null;
+  provider_message_id?: string | null;
+  provider_response?: string | null;
+  last_attempt_at?: string | null;
+  attempt_count?: number;
   scanned_at?: string | null;
   scanned_by?: string | null;
   scanned_by_name?: string | null;

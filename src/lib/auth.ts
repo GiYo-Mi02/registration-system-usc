@@ -1,10 +1,8 @@
-import { supabase } from "./supabase";
 import { AuthState } from "../types";
-import crypto from "crypto";
 
 // ─── LOGIN ─────────────────────────────────────────────────────────────────
-// Calls Supabase RPC `login_user` which does bcrypt comparison server-side.
-// The RPC creates a session token and returns user info — no secrets leave the DB.
+// Calls the server endpoint so credentials and privileged database keys never
+// enter the browser bundle.
 export async function loginUser(
   username: string,
   password: string,
@@ -41,10 +39,10 @@ export async function loginUser(
 // ─── LOGOUT ────────────────────────────────────────────────────────────────
 export async function logoutUser(token: string): Promise<void> {
   try {
-    await supabase
-      .from("committee_sessions")
-      .delete()
-      .eq("session_token", token);
+    await fetch("/api/logout", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` }
+    });
   } catch (e) {
     console.error("[Auth] Logout error:", e);
   }
@@ -72,16 +70,5 @@ export async function sendHeartbeat(token: string): Promise<boolean> {
 
 // ─── VALIDATE SESSION ──────────────────────────────────────────────────────
 export async function validateSession(token: string): Promise<boolean> {
-  try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data } = await supabase
-      .from("committee_sessions")
-      .select("id, last_heartbeat")
-      .eq("session_token", token)
-      .gt("last_heartbeat", fiveMinutesAgo)
-      .maybeSingle();
-    return !!data;
-  } catch (e) {
-    return false;
-  }
+  return sendHeartbeat(token);
 }

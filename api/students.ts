@@ -49,8 +49,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: students, error: stdErr } = await supabase
         .from("students")
         .select(`
-          id, full_name, email, college, form_response_id, imported_at, email_status, email_error,
-          attendance(scanned_at, scanned_by)
+          id, full_name, email, college, program, section, form_response_id, imported_at, email_status, email_error,
+          attendance(scanned_at, scanned_by),
+          email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)
         `)
         .eq("event_id", eventId)
         .order("imported_at", { ascending: false });
@@ -68,6 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const formattedStudents = (students || []).map((s: any) => {
         const att = Array.isArray(s.attendance) ? s.attendance[0] : s.attendance;
+        const emailLog = Array.isArray(s.email_log) ? s.email_log[0] : s.email_log;
         const scanned_by = att?.scanned_by ?? null;
         
         let scanned_by_name = null;
@@ -80,10 +82,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           full_name: s.full_name,
           email: s.email,
           college: s.college,
+          program: s.program,
+          section: s.section,
           form_response_id: s.form_response_id,
           imported_at: s.imported_at,
           email_status: s.email_status,
           email_error: s.email_error,
+          delivery_status: emailLog?.delivery_status ?? null,
+          provider_message_id: emailLog?.provider_message_id ?? null,
+          provider_response: emailLog?.provider_response ?? null,
+          last_attempt_at: emailLog?.last_attempt_at ?? null,
+          attempt_count: emailLog?.attempt_count ?? 0,
           scanned_at: att?.scanned_at ?? null,
           scanned_by: scanned_by,
           scanned_by_name

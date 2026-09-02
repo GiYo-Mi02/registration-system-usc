@@ -1,4 +1,4 @@
-Name,Email,College
-Clark Kent,ggiojoshua2006@gmail.com,College of Journalism
-Bruce Wayne,ggonzales.k12254495@umak.edu.ph,College of Business
-Peter Parker,gonzalesyojibusiness@gmail.com,College of Science
+Name,Email,College,Program,Section
+Sample Student One,student.one@example.invalid,College of Computing and Information Sciences,BS Computer Science,3A
+Sample Student Two,student.two@example.invalid,College of Computing and Information Sciences,BS Information Technology,3B
+Sample Student Three,student.three@example.invalid,College of Computing and Information Sciences,BS Information Systems,2A

@@ -44,7 +44,12 @@ function parseCSVLine(line: string): string[] {
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     if (char === '"') {
-      inQuotes = !inQuotes;
+      if (inQuotes && line[i + 1] === '"') {
+        currentField += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
     } else if (char === ',' && !inQuotes) {
       fields.push(currentField.trim());
       currentField = "";
@@ -81,6 +86,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newCollege, setNewCollege] = useState("");
+  const [newProgram, setNewProgram] = useState("");
+  const [newSection, setNewSection] = useState("");
   const [addLoading, setAddLoading] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -127,7 +134,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     filtered = filtered.filter(s => 
       s.full_name.toLowerCase().includes(q) || 
       s.email.toLowerCase().includes(q) || 
-      s.college.toLowerCase().includes(q)
+      s.college.toLowerCase().includes(q) ||
+      (s.program || "").toLowerCase().includes(q) ||
+      (s.section || "").toLowerCase().includes(q)
     );
   }
 
@@ -145,7 +154,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   if (emailFilter) {
     if (emailFilter === "failed") {
-      filtered = filtered.filter(s => s.email_status === "failed" && s.email_error !== "queued");
+      filtered = filtered.filter(s =>
+        s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || "")
+      );
     } else {
       filtered = filtered.filter(s => s.email_status === emailFilter);
     }
@@ -158,9 +169,14 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   const paginatedStudents = filtered.slice(startIndex, startIndex + itemsPerPage);
 
   // Compute Statistics
-  const emailsSent = students.filter(s => s.email_status === "sent").length;
-  const emailsFailed = students.filter(s => s.email_status === "failed" && s.email_error !== "queued").length;
-  const emailsQueued = students.filter(s => s.email_status === "failed" && s.email_error === "queued").length;
+  const emailsSent = students.filter(s => s.delivery_status === "smtp_accepted").length;
+  const emailsLegacySent = students.filter(s => s.delivery_status === "legacy_sent" || (!s.delivery_status && s.email_status === "sent")).length;
+  const emailsFailed = students.filter(s =>
+    s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || "")
+  ).length;
+  const emailsQueued = students.filter(s =>
+    s.email_status === "failed" && (s.delivery_status === "queued" || ["queued", "sending"].includes(s.email_error || ""))
+  ).length;
   const totalUnsent = students.filter(s => s.email_status === "failed").length;
 
   const stats: Stats = {
@@ -175,7 +191,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   // 1. Manual Add Form submit
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newEmail || !newCollege) {
+    if (!newName.trim() || !newEmail.trim() || !newCollege.trim() || !newProgram.trim() || !newSection.trim()) {
       setAddError("Please fill out all registration fields.");
       return;
     }
@@ -188,6 +204,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         full_name: newName,
         email: newEmail,
         college: newCollege,
+        program: newProgram,
+        section: newSection,
         eventId: selectedEvent.id,
         skipEmails: !sendEmailsCheckbox
       });
@@ -200,6 +218,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       setNewName("");
       setNewEmail("");
       setNewCollege("");
+      setNewProgram("");
+      setNewSection("");
       setShowAddForm(false);
       onRefreshStudents();
     } catch (err: any) {
@@ -220,7 +240,17 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       if (!text) return;
 
       const lines = text.split(/\r?\n/);
-      const parsedStudents: { full_name: string; email: string; college: string }[] = [];
+      const parsedStudents: { full_name: string; email: string; college: string; program: string; section: string }[] = [];
+      const expectedHeaders = ["name", "email", "college", "program", "section"];
+      const actualHeaders = parseCSVLine((lines[0] || "").replace(/^\uFEFF/, ""))
+        .slice(0, expectedHeaders.length)
+        .map(header => header.trim().toLowerCase());
+
+      if (expectedHeaders.some((header, index) => actualHeaders[index] !== header)) {
+        alert("Invalid CSV header. The first five columns must be: Name, Email, College, Program, Section.");
+        e.target.value = "";
+        return;
+      }
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -228,26 +258,31 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
         const fields = parseCSVLine(line);
 
-        if (fields.length >= 3) {
+        if (fields.length >= 5) {
           const full_name = fields[0];
           const email = fields[1];
           const college = fields[2];
-          if (full_name && email && college) {
-            parsedStudents.push({ full_name, email, college });
+          const program = fields[3];
+          const section = fields[4];
+          if (full_name && email && college && program && section) {
+            parsedStudents.push({ full_name, email, college, program, section });
           }
         }
       }
 
       if (parsedStudents.length === 0) {
-        alert("No valid rows found in the CSV. Make sure headers are Name, Email, College.");
+        alert("No valid rows found. Use the columns: Name, Email, College, Program, Section.");
         return;
       }
 
       setSyncLoading(true);
       setImportProgress("Starting import...");
 
-      const batchSize = 100;
+      // SMTP delivery is rate-limited, so keep send-enabled requests within
+      // the serverless execution window. Database-only imports remain larger.
+      const batchSize = sendEmailsCheckbox ? 5 : 100;
       let totalInserted = 0;
+      let totalUpdated = 0;
       let failedBatches = 0;
 
       try {
@@ -261,6 +296,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           const res = await importCsvStudents(auth.token || "", selectedEvent.id, chunk, !sendEmailsCheckbox);
           if (res.success) {
             totalInserted += res.insertedCount || 0;
+            totalUpdated += res.updatedCount || 0;
           } else {
             failedBatches++;
           }
@@ -270,9 +306,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         }
 
         if (failedBatches > 0) {
-          alert(`Import complete, but some batches failed. Registered ${totalInserted} records.`);
+          alert(`Import complete, but some batches failed. Added ${totalInserted} and updated ${totalUpdated} student records.`);
         } else {
-          alert(`CSV Imported successfully! Registered ${totalInserted} student records.`);
+          alert(`CSV imported successfully! Added ${totalInserted} and updated ${totalUpdated} student records.`);
         }
         await onRefreshStudents();
       } catch (err) {
@@ -296,12 +332,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     }
 
     const lines = bulkPasteText.split(/\r?\n/);
-    const parsedStudents: { full_name: string; email: string; college: string }[] = [];
+    const parsedStudents: { full_name: string; email: string; college: string; program: string; section: string }[] = [];
 
-    // Detect if first line contains header fields like name/email/college
+    // Detect if the first line contains the expected student CSV headers.
     let startIndex = 0;
     const firstLine = lines[0].toLowerCase().trim();
-    if (firstLine.includes("name") || firstLine.includes("email") || firstLine.includes("college")) {
+    if (firstLine.includes("name") || firstLine.includes("email") || firstLine.includes("college") || firstLine.includes("program") || firstLine.includes("section")) {
       startIndex = 1; // Skip header line
     }
 
@@ -311,18 +347,20 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
       const fields = parseCSVLine(line);
 
-      if (fields.length >= 3) {
+      if (fields.length >= 5) {
         const full_name = fields[0];
         const email = fields[1];
         const college = fields[2];
-        if (full_name && email && college) {
-          parsedStudents.push({ full_name, email, college });
+        const program = fields[3];
+        const section = fields[4];
+        if (full_name && email && college && program && section) {
+          parsedStudents.push({ full_name, email, college, program, section });
         }
       }
     }
 
     if (parsedStudents.length === 0) {
-      setBulkPasteError("No valid rows found. Ensure formatting is: name,email,college");
+      setBulkPasteError("No valid rows found. Use: name,email,college,program,section");
       return;
     }
 
@@ -352,8 +390,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
     setImportProgress("Starting batch import...");
 
-    const batchSize = 100;
+    const batchSize = sendEmailsCheckbox ? 5 : 100;
     let totalInserted = 0;
+    let totalUpdated = 0;
     let failedBatches = 0;
 
     try {
@@ -367,6 +406,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         const res = await importCsvStudents(auth.token || "", selectedEvent.id, chunk, !sendEmailsCheckbox);
         if (res.success) {
           totalInserted += res.insertedCount || 0;
+          totalUpdated += res.updatedCount || 0;
         } else {
           failedBatches++;
         }
@@ -376,9 +416,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       }
 
       if (failedBatches > 0) {
-        alert(`Import complete, but some batches failed. Registered ${totalInserted} records.`);
+        alert(`Import complete, but some batches failed. Added ${totalInserted} and updated ${totalUpdated} student records.`);
       } else {
-        alert(`Pasted CSV data imported successfully! Registered ${totalInserted} student records.`);
+        alert(`Pasted CSV imported successfully! Added ${totalInserted} and updated ${totalUpdated} student records.`);
       }
       
       setBulkPasteText("");
@@ -400,9 +440,10 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     setIsDispatching(true);
     isDispatchingRef.current = true;
 
-    const targetCount = target === "not_attended"
-      ? students.filter(s => s.scanned_at === null || s.scanned_at === undefined).length
-      : students.filter(s => s.email_status === "failed").length;
+    const targetStudents = target === "not_attended"
+      ? students.filter(s => s.scanned_at === null || s.scanned_at === undefined)
+      : students.filter(s => s.email_status === "failed");
+    const targetCount = targetStudents.length;
 
     if (targetCount === 0) {
       alert("No matching students found to resend tickets.");
@@ -411,17 +452,64 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       return;
     }
 
-    setDispatchProgress("Triggering background bulk email resend on the server...");
+    setDispatchProgress(`Preparing ${targetCount} recipients in safe batches of 5...`);
 
     try {
-      const res = await resendBulk(auth.token || "", selectedEvent.id, target);
-      if (res.success) {
-        alert(`Bulk resending triggered successfully for ${res.count || targetCount} students! The server is sending them in the background. You can track progress below.`);
-      } else {
-        alert(`Failed to start bulk resend: ${res.message || "Unknown error"}`);
+      const batchSize = 5;
+      let processedCount = 0;
+      let acceptedCount = 0;
+      let failedCount = 0;
+      let simulatedCount = 0;
+      let quotaExceeded = false;
+
+      for (let index = 0; index < targetStudents.length; index += batchSize) {
+        if (!isDispatchingRef.current) break;
+
+        const batch = targetStudents.slice(index, index + batchSize);
+        const batchNumber = Math.floor(index / batchSize) + 1;
+        const totalBatches = Math.ceil(targetStudents.length / batchSize);
+        setDispatchProgress(
+          `Submitting batch ${batchNumber}/${totalBatches} · SMTP accepted ${acceptedCount} · Failed ${failedCount}`
+        );
+
+        const res = await resendBulk(
+          auth.token || "",
+          selectedEvent.id,
+          batch.map(student => student.id)
+        );
+
+        if (!res.success) {
+          throw new Error(res.message || `Batch ${batchNumber} failed.`);
+        }
+
+        processedCount += res.count || 0;
+        acceptedCount += res.acceptedCount || 0;
+        failedCount += res.failedCount || 0;
+        simulatedCount += res.simulatedCount || 0;
+        quotaExceeded = Boolean(res.quotaExceeded);
+
+        await onRefreshStudents();
+
+        if (quotaExceeded) break;
+        if (index + batchSize < targetStudents.length) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
       }
+
+      const stoppedByUser = !isDispatchingRef.current && processedCount < targetCount;
+      const stopReason = quotaExceeded
+        ? " Sending stopped because the provider quota was reached."
+        : stoppedByUser
+          ? " Sending was paused by the administrator."
+          : "";
+
+      alert(
+        `Dispatch finished. Processed ${processedCount}/${targetCount}; SMTP accepted ${acceptedCount}; failed ${failedCount}; simulated ${simulatedCount}.${stopReason}\n\n` +
+        "SMTP accepted means the provider took the message. It does not guarantee Inbox delivery, so recipients should also check Spam or institutional quarantine."
+      );
     } catch (err) {
-      alert("Connection error starting bulk resend.");
+      const message = err instanceof Error ? err.message : "Unknown dispatch error";
+      alert(`Bulk dispatch stopped: ${message}`);
     } finally {
       setIsDispatching(false);
       isDispatchingRef.current = false;
@@ -560,17 +648,24 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   // 8. Client-side CSV generator for export
   const handleExportCSV = () => {
-    let csv = "Email,Name,College,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
     for (const student of students) {
       const isAttended = student.scanned_at ? "Yes" : "No";
       const scannedTime = student.scanned_at ? new Date(student.scanned_at).toISOString() : "--:--";
       const scannerName = student.scanned_by_name || "N/A";
       
       const escapedName = student.full_name.replace(/"/g, '""');
+      const escapedEmail = student.email.replace(/"/g, '""');
       const escapedCollege = student.college.replace(/"/g, '""');
+      const escapedProgram = (student.program || "").replace(/"/g, '""');
+      const escapedSection = (student.section || "").replace(/"/g, '""');
+      const deliveryStatus = student.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
+      const escapedMessageId = (student.provider_message_id || "").replace(/"/g, '""');
+      const escapedProviderResponse = (student.provider_response || "").replace(/"/g, '""');
+      const lastAttempt = student.last_attempt_at ? new Date(student.last_attempt_at).toISOString() : "";
       const escapedScanner = scannerName.replace(/"/g, '""');
       
-      csv += `"${student.email}","${escapedName}","${escapedCollege}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
     
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -582,6 +677,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -717,13 +813,13 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
         <div className="bg-brand-primary/80 p-5 rounded-2xl border border-brand-accent/10 shadow-lg space-y-3">
           <div className="flex justify-between items-center text-brand-accent">
-            <span className="text-[10px] tracking-widest font-mono uppercase font-bold text-brand-text/60">Email Delivery Rate</span>
+            <span className="text-[10px] tracking-widest font-mono uppercase font-bold text-brand-text/60">SMTP Acceptance Rate</span>
             <MailCheck className="w-5 h-5 opacity-75" />
           </div>
           <div>
             <p className="text-3xl font-serif font-bold text-brand-accent">{stats.emailSuccessRate}%</p>
             <p className="text-[11px] text-brand-text/40 font-mono mt-1">
-              Sent: <span className="text-emerald-400 font-bold">{stats.emailsSent}</span> | Fail: <span className="text-red-400 font-bold">{stats.emailsFailed}</span>
+              Accepted: <span className="text-emerald-400 font-bold">{stats.emailsSent}</span> | Legacy: <span className="text-amber-300 font-bold">{emailsLegacySent}</span> | Fail: <span className="text-red-400 font-bold">{stats.emailsFailed}</span>
             </p>
           </div>
         </div>
@@ -753,7 +849,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 Ticket Dispatch Pipeline
               </h2>
               <p className="text-xs text-brand-text/60 font-mono">
-                Real-time status of email ticket transmissions for this event
+                SMTP transport status only; acceptance does not prove Inbox delivery
               </p>
             </div>
             
@@ -778,24 +874,32 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           <div className="space-y-2">
             <div className="flex justify-between items-end text-xs font-mono">
               <span className="text-brand-text/80">
-                Processed: <span className="font-bold text-brand-text">{(emailsSent + emailsFailed)}</span> / {stats.total}
+                Processed: <span className="font-bold text-brand-text">{(emailsSent + emailsLegacySent + emailsFailed)}</span> / {stats.total}
               </span>
               <span className="text-brand-accent font-bold">
-                {Math.round((stats.total > 0 ? ((emailsSent + emailsFailed) / stats.total) * 100 : 0))}% Complete
+                {Math.round((stats.total > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / stats.total) * 100 : 0))}% Complete
               </span>
             </div>
             
             <div className="h-4 w-full bg-brand-primary-dark border border-brand-text/10 rounded-full overflow-hidden relative shadow-inner">
-              {/* Sent progress (green) */}
+              {/* SMTP-accepted progress (green) */}
               <div 
                 className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500 ease-out absolute left-0 top-0"
                 style={{ width: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%` }}
+              />
+              {/* Historical sent rows without a provider receipt (amber) */}
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-500 ease-out absolute top-0"
+                style={{
+                  left: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%`,
+                  width: `${stats.total > 0 ? (emailsLegacySent / stats.total) * 100 : 0}%`
+                }}
               />
               {/* Failed progress (red) */}
               <div 
                 className="h-full bg-gradient-to-r from-red-500 to-rose-450 transition-all duration-500 ease-out absolute"
                 style={{ 
-                  left: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%`,
+                  left: `${stats.total > 0 ? ((emailsSent + emailsLegacySent) / stats.total) * 100 : 0}%`,
                   width: `${stats.total > 0 ? (emailsFailed / stats.total) * 100 : 0}%` 
                 }}
               />
@@ -804,17 +908,21 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <div 
                   className="h-full bg-blue-400/30 absolute animate-pulse"
                   style={{
-                    left: `${stats.total > 0 ? ((emailsSent + emailsFailed) / stats.total) * 100 : 0}%`,
+                    left: `${stats.total > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / stats.total) * 100 : 0}%`,
                     width: `${stats.total > 0 ? (emailsQueued / stats.total) * 100 : 0}%`
                   }}
                 />
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-2 text-center text-xs font-mono">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-2 text-center text-xs font-mono">
               <div className="bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-2xl">
-                <span className="block text-[10px] uppercase font-bold text-emerald-400 mb-1">Delivered</span>
+                <span className="block text-[10px] uppercase font-bold text-emerald-400 mb-1">SMTP Accepted</span>
                 <span className="text-xl font-bold text-brand-text">{emailsSent}</span>
+              </div>
+              <div className="bg-amber-950/20 border border-amber-500/20 p-3 rounded-2xl">
+                <span className="block text-[10px] uppercase font-bold text-amber-300 mb-1">Legacy Sent</span>
+                <span className="text-xl font-bold text-brand-text">{emailsLegacySent}</span>
               </div>
               <div className="bg-blue-950/20 border border-blue-500/20 p-3 rounded-2xl">
                 <span className="block text-[10px] uppercase font-bold text-blue-400 mb-1">Queued</span>
@@ -838,13 +946,13 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               
               <div className="max-h-[220px] overflow-y-auto border border-brand-text/10 rounded-2xl bg-brand-primary-dark/40 shadow-inner divide-y divide-brand-text/5 text-[11px] font-mono">
                 {students
-                  .filter(s => s.email_status === "failed" && s.email_error !== "queued")
+                  .filter(s => s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || ""))
                   .map(student => (
                     <div key={student.id} className="p-3 flex justify-between items-center gap-4 hover:bg-brand-text/5 transition-all">
                       <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-brand-text font-bold truncate max-w-[150px]">{student.full_name}</span>
-                          <span className="text-brand-text/40">({student.college})</span>
+                          <span className="text-brand-text/40">({student.college} · {student.program || "Program not provided"} · {student.section || "Section not provided"})</span>
                         </div>
                         <span className="text-brand-text/60 truncate">{student.email}</span>
                         <span className="text-red-400/90 text-[10px] mt-0.5 whitespace-pre-wrap leading-relaxed">
@@ -960,6 +1068,10 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             </button>
           </div>
 
+          <p className="text-[11px] font-mono text-brand-text/55 bg-brand-primary-dark/40 border border-brand-accent/10 rounded-xl px-4 py-3">
+            Required CSV columns, in order: <span className="text-brand-accent">Name, Email, College, Program, Section</span>. Exported reports keep these first five columns and append delivery/audit fields, so they can be imported again.
+          </p>
+
           {/* Email Delivery Toggle Checkbox */}
           <div className="flex items-center gap-3 bg-brand-primary-dark/40 px-5 py-3.5 rounded-2xl border border-brand-accent/10 text-xs font-mono text-brand-text/80 shadow-md">
             <input
@@ -983,7 +1095,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               
               {addError && <div className="text-xs text-red-400 bg-red-950/20 p-2.5 rounded border border-red-500/20">{addError}</div>}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Full Name</label>
                   <input
@@ -1020,6 +1132,30 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                     placeholder="College of Humanities"
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Program</label>
+                  <input
+                    id="add-program-input"
+                    type="text"
+                    required
+                    value={newProgram}
+                    onChange={(e) => setNewProgram(e.target.value)}
+                    className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text focus:outline-none focus:border-brand-accent"
+                    placeholder="BS Computer Science"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold tracking-wider uppercase font-mono text-brand-text/60 mb-1">Section</label>
+                  <input
+                    id="add-section-input"
+                    type="text"
+                    required
+                    value={newSection}
+                    onChange={(e) => setNewSection(e.target.value)}
+                    className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text focus:outline-none focus:border-brand-accent"
+                    placeholder="3A"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -1050,7 +1186,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <h3 className="font-serif text-sm font-bold uppercase tracking-wider text-brand-accent">
                   📋 Bulk Paste CSV Registrants
                 </h3>
-                <span className="text-[10px] font-mono opacity-60">Format: name,email,college</span>
+                <span className="text-[10px] font-mono opacity-60">Format: name,email,college,program,section</span>
               </div>
 
               {bulkPasteError && <div className="text-xs text-red-400 bg-red-950/20 p-2.5 rounded border border-red-500/20">{bulkPasteError}</div>}
@@ -1091,7 +1227,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                   required
                   value={bulkPasteText}
                   onChange={(e) => setBulkPasteText(e.target.value)}
-                  placeholder="name,email,college&#10;John Doe,john@example.com,College of Science&#10;Jane Smith,jane@example.com,College of Engineering"
+                  placeholder="name,email,college,program,section&#10;John Doe,john@example.com,CCIS,BS Computer Science,3A&#10;Jane Smith,jane@example.com,CCIS,BS Information Technology,2B"
                   className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text font-mono focus:outline-none focus:border-brand-accent placeholder-brand-text/25"
                 />
               </div>
@@ -1247,8 +1383,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               className="w-full px-3 py-2 bg-brand-primary border border-brand-accent/10 rounded-xl text-xs text-brand-text focus:outline-none focus:border-brand-accent cursor-pointer font-mono"
             >
               <option value="">All Email Delivery States</option>
-              <option value="sent">Sent Successfully 🟩</option>
-              <option value="failed">Failed Delivery 🟥</option>
+              <option value="sent">SMTP Accepted / Legacy Sent</option>
+              <option value="failed">Queued / Failed / Simulated</option>
             </select>
           </div>
 
@@ -1262,6 +1398,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <th className="px-6 py-4 font-semibold">Student Email</th>
                 <th className="px-6 py-4 font-semibold">Full Name</th>
                 <th className="px-6 py-4 font-semibold">College Dept</th>
+                <th className="px-6 py-4 font-semibold">Program</th>
+                <th className="px-6 py-4 font-semibold">Section</th>
                 <th className="px-6 py-4 font-semibold text-center">Email Status</th>
                 <th className="px-6 py-4 font-semibold text-center">Attendance</th>
                 <th className="px-6 py-4 font-semibold text-center">Time</th>
@@ -1271,7 +1409,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             <tbody className="divide-y divide-brand-text/5 text-xs">
               {paginatedStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-brand-text/40 italic font-mono">
+                  <td colSpan={9} className="px-6 py-12 text-center text-brand-text/40 italic font-mono">
                     No registry rows matching current search parameters.
                   </td>
                 </tr>
@@ -1286,14 +1424,33 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                     <td className="px-6 py-3.5 font-mono text-brand-text/85 max-w-[180px] truncate">{s.email}</td>
                     <td className="px-6 py-3.5 font-serif italic text-brand-text font-semibold">{s.full_name}</td>
                     <td className="px-6 py-3.5 text-brand-text/60 font-sans">{s.college}</td>
+                    <td className="px-6 py-3.5 text-brand-text/60 font-sans">{s.program || "Not provided"}</td>
+                    <td className="px-6 py-3.5 text-brand-text/60 font-mono">{s.section || "Not provided"}</td>
                     <td className="px-6 py-3.5 text-center">
-                      {s.email_status === "sent" ? (
-                        <span className="inline-flex items-center gap-1 bg-green-950/40 text-green-300 px-2.5 py-1 rounded-full border border-green-500/20 text-[10px] font-semibold">
-                          <Check className="w-2.5 h-2.5" /> Sent
+                      {s.delivery_status === "smtp_accepted" ? (
+                        <span
+                          title={`Accepted by SMTP provider, not confirmed in Inbox.${s.provider_message_id ? ` Message ID: ${s.provider_message_id}` : ""}${s.provider_response ? ` Response: ${s.provider_response}` : ""}`}
+                          className="inline-flex items-center gap-1 bg-green-950/40 text-green-300 px-2.5 py-1 rounded-full border border-green-500/20 text-[10px] font-semibold cursor-help"
+                        >
+                          <Check className="w-2.5 h-2.5" /> SMTP Accepted
                         </span>
-                      ) : s.email_error === "queued" ? (
+                      ) : s.delivery_status === "legacy_sent" || (!s.delivery_status && s.email_status === "sent") ? (
+                        <span
+                          title="Historical sent flag; no SMTP provider receipt was stored."
+                          className="inline-flex items-center gap-1 bg-amber-950/40 text-amber-300 px-2.5 py-1 rounded-full border border-amber-500/20 text-[10px] font-semibold cursor-help"
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" /> Legacy Sent
+                        </span>
+                      ) : s.delivery_status === "queued" || ["queued", "sending"].includes(s.email_error || "") ? (
                         <span className="inline-flex items-center gap-1 bg-blue-950/40 text-blue-300 px-2.5 py-1 rounded-full border border-blue-500/20 text-[10px] font-semibold animate-pulse">
-                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Sending...
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> {s.email_error === "sending" ? "Submitting..." : "Queued"}
+                        </span>
+                      ) : s.delivery_status === "simulated" ? (
+                        <span
+                          title="Simulation mode was enabled; no message was submitted to a recipient provider."
+                          className="inline-flex items-center gap-1 bg-purple-950/40 text-purple-300 px-2.5 py-1 rounded-full border border-purple-500/20 text-[10px] font-semibold cursor-help"
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" /> Simulated
                         </span>
                       ) : (
                         <span 
@@ -1404,7 +1561,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             {/* Modal Header */}
             <div className="p-5 border-b border-brand-accent/10 bg-brand-primary flex justify-between items-center">
               <div>
-                <span className="text-[10px] tracking-widest font-mono uppercase text-brand-accent block">Sent Mail Server Log</span>
+                <span className="text-[10px] tracking-widest font-mono uppercase text-brand-accent block">Stored Email Preview</span>
                 <h3 className="font-serif text-lg font-bold text-brand-text">
                   Email Preview for {selectedStudentForEmail.full_name}
                 </h3>
