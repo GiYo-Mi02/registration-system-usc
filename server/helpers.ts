@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import fs from "node:fs";
 import path from "node:path";
-import { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } from "./config";
+import { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } from "./config.js";
 
 const EMAIL_HEADER_PUBLIC_SRC = "/ccisixplore.jpg";
 const EMAIL_HEADER_CID = "ccisixplore-header";
