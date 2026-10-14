@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "./config";
+import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "./config.js";
 
 const safeUrl = SUPABASE_URL || "https://placeholder.supabase.co";
 const safeKey = SUPABASE_SERVICE_ROLE_KEY || "placeholder-key";
