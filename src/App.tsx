@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { AuthState, Student, Event } from "./types";
 import LoginScreen from "./components/LoginScreen";
 import EventsMenu from "./components/EventsMenu";
-import AdminPanel from "./components/AdminPanel";
-import ScannerPanel from "./components/ScannerPanel";
+const AdminPanel = lazy(() => import("./components/AdminPanel"));
+const ScannerPanel = lazy(() => import("./components/ScannerPanel"));
 import { ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
 import { logoutUser, sendHeartbeat } from "./lib/auth";
 import { fetchStudents } from "./lib/api";
 
 export default function App() {
+  const registryRequestRef = useRef(0);
   const [auth, setAuth] = useState<AuthState>({
     isAuthenticated: false,
     token: null,
@@ -25,19 +26,21 @@ export default function App() {
   const loadStudents = useCallback(async (tokenOverride?: string, eventIdOverride?: string) => {
     const tokenToUse = tokenOverride || auth.token;
     const eventIdToUse = eventIdOverride || selectedEvent?.id;
-    if (!tokenToUse || !eventIdToUse) return false;
+    if (!tokenToUse || !eventIdToUse || auth.role !== "admin") return false;
+    const request = ++registryRequestRef.current;
     setLoadingRegistry(true);
     try {
       const students = await fetchStudents(tokenToUse, eventIdToUse);
+      if (request !== registryRequestRef.current) return false;
       setStudents(students);
       return true;
     } catch (e) {
       console.error("Failed to fetch students:", e);
       return false;
     } finally {
-      setLoadingRegistry(false);
+      if (request === registryRequestRef.current) setLoadingRegistry(false);
     }
-  }, [auth.token, selectedEvent?.id]);
+  }, [auth.token, auth.role, selectedEvent?.id]);
 
   // Check existing session on load
   useEffect(() => {
@@ -46,11 +49,14 @@ export default function App() {
     if (cachedAuth) {
       try {
         const parsedAuth = JSON.parse(cachedAuth);
+        if (parsedAuth?.isAuthenticated !== true || typeof parsedAuth.token !== "string" || !parsedAuth.token
+          || !["admin", "committee"].includes(parsedAuth.role) || typeof parsedAuth.user?.username !== "string") {
+          throw new Error("Invalid cached session.");
+        }
         setAuth(parsedAuth);
         if (cachedEvent) {
           const parsedEvent = JSON.parse(cachedEvent);
-          setSelectedEvent(parsedEvent);
-          loadStudents(parsedAuth.token, parsedEvent.id);
+          if (typeof parsedEvent?.id === "string" && typeof parsedEvent?.name === "string") setSelectedEvent(parsedEvent);
         }
       } catch (e) {
         sessionStorage.removeItem("securpass_auth");
@@ -62,27 +68,31 @@ export default function App() {
   // Keep the registry fresh through authenticated API polling. This avoids
   // shipping any privileged Supabase key in the browser bundle.
   useEffect(() => {
-    if (!auth.isAuthenticated || !auth.token || !selectedEvent?.id) {
+    if (!auth.isAuthenticated || !auth.token || !selectedEvent?.id || auth.role !== "admin") {
       setSseStatus("disconnected");
       return;
     }
 
     let active = true;
+    let pollingTimer: number | undefined;
     setSseStatus("connecting");
 
     const syncRegistry = async () => {
       const connected = await loadStudents();
-      if (active) setSseStatus(connected ? "connected" : "disconnected");
+      if (active) {
+        setSseStatus(connected ? "connected" : "disconnected");
+        pollingTimer = window.setTimeout(() => void syncRegistry(), 15000);
+      }
     };
 
     void syncRegistry();
-    const pollingInterval = window.setInterval(() => void syncRegistry(), 5000);
 
     return () => {
       active = false;
-      window.clearInterval(pollingInterval);
+      window.clearTimeout(pollingTimer);
+      registryRequestRef.current++;
     };
-  }, [auth.isAuthenticated, auth.token, selectedEvent?.id, loadStudents]);
+  }, [auth.isAuthenticated, auth.token, auth.role, selectedEvent?.id, loadStudents]);
 
   // Validate immediately, then keep the custom scanner session alive.
   useEffect(() => {
@@ -113,21 +123,23 @@ export default function App() {
   };
 
   const handleSelectEvent = (event: Event) => {
+    registryRequestRef.current++;
+    setStudents([]);
     setSelectedEvent(event);
     sessionStorage.setItem("securpass_event", JSON.stringify(event));
     loadStudents(auth.token ?? undefined, event.id);
   };
 
   const handleBackToEvents = () => {
+    registryRequestRef.current++;
     setSelectedEvent(null);
     sessionStorage.removeItem("securpass_event");
     setStudents([]);
   };
 
   const handleLogout = async () => {
-    if (auth.token) {
-      await logoutUser(auth.token);
-    }
+    const token = auth.token;
+    registryRequestRef.current++;
 
     const clearedAuth: AuthState = {
       isAuthenticated: false,
@@ -140,6 +152,7 @@ export default function App() {
     sessionStorage.removeItem("securpass_auth");
     sessionStorage.removeItem("securpass_event");
     setStudents([]);
+    if (token) await logoutUser(token);
   };
 
   const totalCount = students.length;
@@ -172,7 +185,7 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-6 self-stretch sm:self-auto justify-between sm:justify-end">
               
               {/* Attendance Rate dynamic HUD */}
-              <div className="flex items-center gap-4 text-right">
+              {auth.role === "admin" && <div className="flex items-center gap-4 text-right">
                 <div>
                   <p className="text-[10px] uppercase opacity-60 tracking-wider font-mono">Attendance Rate</p>
                   <p className="text-lg font-bold font-serif text-brand-accent">
@@ -184,7 +197,7 @@ export default function App() {
                     Live
                   </div>
                 </div>
-              </div>
+              </div>}
 
               <div className="h-8 w-[1px] bg-brand-text/20 hidden md:block"></div>
 
@@ -192,14 +205,14 @@ export default function App() {
                 {/* Authenticated registry-sync indicator */}
                 <div className="flex items-center gap-2 bg-brand-primary-dark/80 px-3 py-1.5 rounded-full border border-brand-text/10 font-mono text-[10px] shadow-inner font-bold">
                   <span className={`w-2.5 h-2.5 rounded-full ${
-                    sseStatus === "connected" 
+                    auth.role === "committee" ? "bg-brand-accent" : sseStatus === "connected"
                       ? "bg-emerald-500 animate-pulse" 
                       : sseStatus === "connecting"
                       ? "bg-amber-400 animate-spin"
                       : "bg-red-500"
                   }`}></span>
                   <span className="text-brand-text/80 uppercase tracking-wider">
-                    {sseStatus === "connected" ? "Live Sync" : sseStatus === "connecting" ? "Syncing..." : "Offline"}
+                    {auth.role === "committee" ? "Scanner Session" : sseStatus === "connected" ? "Live Sync" : sseStatus === "connecting" ? "Syncing..." : "Offline"}
                   </span>
                 </div>
 
@@ -219,6 +232,7 @@ export default function App() {
 
       {/* Primary Application Screens Routing */}
       <main className="flex-grow flex flex-col">
+        <Suspense fallback={<p role="status" className="p-8 text-center">Loading console...</p>}>
         {!auth.isAuthenticated ? (
           <LoginScreen onLoginSuccess={handleLoginSuccess} />
         ) : !selectedEvent ? (
@@ -250,6 +264,7 @@ export default function App() {
             <button onClick={handleLogout} className="px-4 py-2 bg-brand-accent text-brand-primary-dark font-bold rounded">Logout</button>
           </div>
         )}
+        </Suspense>
       </main>
 
       {/* Global Brand Footer */}

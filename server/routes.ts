@@ -1,3 +1,5 @@
+import { escapeCsvValue } from "../src/lib/csv";
+import { renderTicketPreview } from "./ticket-preview";
 import express from "express";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
@@ -66,29 +68,14 @@ async function cleanupSessions() {
 
 // Clean sessions periodically - only in long-lived processes (not Vercel serverless)
 // On Vercel, PORT is not set; cleanup runs as a one-shot on-demand instead.
-const IS_SERVERLESS = !process.env.PORT;
+const IS_SERVERLESS = Boolean(process.env.VERCEL);
 if (!IS_SERVERLESS) {
-  setInterval(cleanupSessions, 60000);
+  setInterval(cleanupSessions, 60000).unref();
 }
 
 // --- SSE ROUTE ---
-router.get("/api/live-updates", async (req, res) => {
-  const token = req.query.token as string;
-  if (!token) {
-    return res.status(401).json({ success: false, message: "Token required for live updates" });
-  }
-
+router.get("/api/live-updates", authenticateToken, async (req, res) => {
   try {
-    const { data: session } = await supabase
-      .from("committee_sessions")
-      .select("id")
-      .eq("session_token", token)
-      .maybeSingle();
-
-    if (!session) {
-      return res.status(401).json({ success: false, message: "Invalid session token" });
-    }
-
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -144,9 +131,9 @@ router.post(["/api/auth/heartbeat", "/api/heartbeat"], authenticateToken, async 
 
 // --- AUTH ROUTER ---
 router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) => {
-  const { username, password, role } = req.body;
+  const { username, password, role } = req.body || {};
 
-  if (!username || !password || !role) {
+  if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 128 || password.length > 256 || !["admin", "committee"].includes(role)) {
     return res.status(400).json({ success: false, message: "Username, password, and role are required" });
   }
 
@@ -162,12 +149,13 @@ router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) =>
       }
 
       const sessionToken = `sess_adm_${crypto.randomBytes(16).toString("hex")}`;
-      await supabase.from("committee_sessions").insert({
-        id: `sess_adm_${Date.now()}`,
+      const { error: sessionInsertError } = await supabase.from("committee_sessions").insert({
+        id: `sess_adm_${crypto.randomUUID()}`,
         committee_user_id: "admin-id",
         session_token: sessionToken,
         last_heartbeat: new Date().toISOString()
       });
+      if (sessionInsertError) throw sessionInsertError;
 
       const { count } = await supabase
         .from("committee_sessions")
@@ -184,7 +172,6 @@ router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) =>
     }
 
     if (role === "committee") {
-      console.log(`[AUTH DEBUG] Scanner login attempt: username=${username}`);
       const { data: user, error } = await supabase
         .from("committee_users")
         .select("*")
@@ -197,29 +184,26 @@ router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) =>
       }
 
       if (!user) {
-        console.warn(`[AUTH DEBUG] Scanner user not found in DB: username=${username}`);
         return res.status(401).json({ success: false, message: "Invalid scanner credentials or inactive account" });
       }
 
-      console.log(`[AUTH DEBUG] Found user in DB:`, user);
       if (!user.active) {
-        console.warn(`[AUTH DEBUG] User is inactive: username=${username}`);
         return res.status(401).json({ success: false, message: "Invalid scanner credentials or inactive account" });
       }
 
       const match = await bcrypt.compare(password, user.password_hash);
-      console.log(`[AUTH DEBUG] Password validation outcome for ${username}: ${match}`);
       if (!match) {
         return res.status(401).json({ success: false, message: "Invalid scanner credentials" });
       }
 
       const sessionToken = `sess_com_${crypto.randomBytes(16).toString("hex")}`;
-      await supabase.from("committee_sessions").insert({
-        id: `sess_com_${Date.now()}`,
+      const { error: sessionInsertError } = await supabase.from("committee_sessions").insert({
+        id: `sess_com_${crypto.randomUUID()}`,
         committee_user_id: user.id,
         session_token: sessionToken,
         last_heartbeat: new Date().toISOString()
       });
+      if (sessionInsertError) throw sessionInsertError;
 
       const { count } = await supabase
         .from("committee_sessions")
@@ -238,12 +222,12 @@ router.post(["/api/auth/login", "/api/login"], loginLimiter, async (req, res) =>
     return res.status(400).json({ success: false, message: "Unsupported console role login request" });
   } catch (err: any) {
     console.error("Login route error:", err);
-    return res.status(500).json({ success: false, message: `Internal server error logging in: ${err?.message || String(err)}` });
+    return res.status(500).json({ success: false, message: "Login service is unavailable." });
   }
 });
 
 router.post("/api/auth/logout", async (req, res) => {
-  const { token } = req.body;
+  const { token } = req.body || {};
   if (!token) return res.status(400).json({ success: false, message: "Session token is required" });
 
   try {
@@ -294,32 +278,6 @@ router.delete("/api/heartbeat", async (req, res) => {
   }
 });
 
-router.post("/api/auth/heartbeat", async (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ success: false, message: "Token required" });
-
-  try {
-    const { data: session } = await supabase
-      .from("committee_sessions")
-      .select("id")
-      .eq("session_token", token)
-      .maybeSingle();
-
-    if (!session) {
-      return res.status(401).json({ success: false, message: "Session expired or invalid" });
-    }
-
-    await supabase
-      .from("committee_sessions")
-      .update({ last_heartbeat: new Date().toISOString() })
-      .eq("session_token", token);
-
-    return res.json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: "Heartbeat failed" });
-  }
-});
-
 // --- EVENTS CRUD ROUTER ---
 router.get("/api/events", authenticateToken, async (req, res) => {
   try {
@@ -337,7 +295,7 @@ router.get("/api/events", authenticateToken, async (req, res) => {
 });
 
 router.post("/api/events", authenticateToken, requireAdmin, async (req, res) => {
-  const { name, event_date, description, venue, banner_url } = req.body;
+  const { name, event_date, description, venue, banner_url } = req.body || {};
   if (!name || !event_date || !description || !venue || !banner_url) {
     return res.status(400).json({ success: false, message: "Please fill in all event details." });
   }
@@ -367,7 +325,7 @@ router.post("/api/events", authenticateToken, requireAdmin, async (req, res) => 
 
 router.put(["/api/events/:id", "/api/events"], authenticateToken, requireAdmin, async (req, res) => {
   const eventId = req.params.id || (req.query.id as string);
-  const { name, event_date, description, venue, banner_url } = req.body;
+  const { name, event_date, description, venue, banner_url } = req.body || {};
   if (!name || !event_date || !description || !venue || !banner_url) {
     return res.status(400).json({ success: false, message: "Please fill in all event details." });
   }
@@ -415,13 +373,7 @@ router.delete(["/api/events/:id", "/api/events"], authenticateToken, requireAdmi
 });
 
 // --- STUDENTS ROUTER ---
-router.get("/api/students", authenticateToken, async (req, res, next) => {
-  const isDeveloperMode = process.env.NODE_ENV !== "production";
-  if (req.user?.role !== "admin" && !isDeveloperMode) {
-    return res.status(403).json({ success: false, message: "Access denied: Administrator role required" });
-  }
-  next();
-}, async (req, res) => {
+router.get("/api/students", authenticateToken, requireAdmin, async (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 50;
   const search = (req.query.search as string || "").toLowerCase();
@@ -549,7 +501,7 @@ router.get(["/api/students/:id/email-preview", "/api/email-preview"], authentica
 
     return res.json({
       success: true,
-      email_html: log.email_html,
+      email_html: await renderTicketPreview(supabase, studentId, log),
       qr_data_url: log.qr_data_url
     });
   } catch (err) {
@@ -557,13 +509,7 @@ router.get(["/api/students/:id/email-preview", "/api/email-preview"], authentica
   }
 });
 
-router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
-  const isDeveloperMode = process.env.NODE_ENV !== "production";
-  if (req.user?.role !== "admin" && !isDeveloperMode) {
-    return res.status(403).json({ success: false, message: "Access denied: Administrator role required" });
-  }
-  next();
-}, async (req, res) => {
+router.get("/api/students/:id/token", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { data: tokenRecord, error } = await supabase
       .from("qr_tokens")
@@ -585,7 +531,7 @@ router.get("/api/students/:id/token", authenticateToken, (req, res, next) => {
 });
 
 router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, requireAdmin, async (req, res) => {
-  const { full_name, email, college, program, year, section, eventId, skipEmails } = req.body;
+  const { full_name, email, college, program, year, section, eventId, skipEmails } = req.body || {};
   const trimmedName = String(full_name || "").trim();
   const trimmedEmail = String(email || "").trim();
   const trimmedCollege = String(college || "").trim();
@@ -747,7 +693,7 @@ router.post(["/api/students/manual-add", "/api/manual-add"], authenticateToken, 
 });
 
 router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, requireAdmin, async (req, res) => {
-  const { students, eventId, skipEmails } = req.body;
+  const { students, eventId, skipEmails } = req.body || {};
   if (!Array.isArray(students) || !eventId) {
     return res.status(400).json({ success: false, message: "Invalid payload: students array and eventId required" });
   }
@@ -982,7 +928,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 });
 
 router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken, requireAdmin, async (req, res) => {
-  const { eventId, studentIds } = req.body;
+  const { eventId, studentIds } = req.body || {};
   if (!eventId || !Array.isArray(studentIds) || studentIds.length === 0) {
     return res.status(400).json({ success: false, message: "eventId and a non-empty studentIds array are required." });
   }
@@ -1129,7 +1075,7 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
 });
 
 router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requireAdmin, async (req, res) => {
-  const studentId = req.params.id || (req.query.studentId as string) || req.body.studentId;
+  const studentId = req.params.id || (req.query.studentId as string) || req.body?.studentId;
   resetEmailQuota();
   let emailHtml = "";
   let qrDataUrl = "";
@@ -1231,7 +1177,7 @@ router.post(["/api/students/:id/resend", "/api/resend"], authenticateToken, requ
 });
 
 router.post("/api/reset-emails", authenticateToken, requireAdmin, async (req, res) => {
-  const { eventId, emails } = req.body;
+  const { eventId, emails } = req.body || {};
   if (!eventId) {
     return res.status(400).json({ success: false, message: "eventId parameter is required." });
   }
@@ -1380,10 +1326,10 @@ router.post("/api/students/:id/delete", authenticateToken, requireAdmin, async (
 
 // --- SCAN ROUTER ---
 router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, async (req, res) => {
-  const { token } = req.body;
+  const { token, eventId: scannerEventId } = req.body || {};
   const scanned_by = req.user?.id;
 
-  if (!token) {
+  if (typeof token !== "string" || !token || typeof scannerEventId !== "string" || !scannerEventId) {
     return res.status(400).json({ success: false, message: "Token is required for scanning verification" });
   }
 
@@ -1398,8 +1344,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
   const nonce = parts[2];
   const signature = parts[3];
 
-  const { eventId: scannerEventId } = req.body;
-  if (scannerEventId && tokenEventId !== scannerEventId) {
+  if (tokenEventId !== scannerEventId) {
     return res.json({ status: "FAKE", message: "This ticket is not valid for this event." });
   }
 
@@ -1509,17 +1454,17 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
         scannerName = scannerMap.get(att.scanned_by) || (att.scanned_by === "admin-id" ? "Admin Desk" : "Unknown Station");
       }
 
-      const escapedName = student.full_name.replace(/"/g, '""');
-      const escapedEmail = student.email.replace(/"/g, '""');
-      const escapedCollege = student.college.replace(/"/g, '""');
-      const escapedProgram = (student.program || "").replace(/"/g, '""');
-      const escapedYear = (student.year || "").replace(/"/g, '""');
-      const escapedSection = (student.section || "").replace(/"/g, '""');
+      const escapedName = escapeCsvValue(student.full_name);
+      const escapedEmail = escapeCsvValue(student.email);
+      const escapedCollege = escapeCsvValue(student.college);
+      const escapedProgram = escapeCsvValue((student.program || ""));
+      const escapedYear = escapeCsvValue((student.year || ""));
+      const escapedSection = escapeCsvValue((student.section || ""));
       const deliveryStatus = emailLog?.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
-      const escapedMessageId = (emailLog?.provider_message_id || "").replace(/"/g, '""');
-      const escapedProviderResponse = (emailLog?.provider_response || "").replace(/"/g, '""');
+      const escapedMessageId = escapeCsvValue((emailLog?.provider_message_id || ""));
+      const escapedProviderResponse = escapeCsvValue((emailLog?.provider_response || ""));
       const lastAttempt = emailLog?.last_attempt_at ? new Date(emailLog.last_attempt_at).toISOString() : "";
-      const escapedScanner = scannerName.replace(/"/g, '""');
+      const escapedScanner = escapeCsvValue(scannerName);
 
       csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
@@ -1534,6 +1479,9 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
 
 // --- RESET DB ROUTER ---
 router.post("/api/reset-db", authenticateToken, requireAdmin, async (req, res) => {
+  if (process.env.ENABLE_DEMO_RESET !== "true" || process.env.NODE_ENV === "production" || process.env.VERCEL) {
+    return res.status(403).json({ success: false, message: "Demo reset is disabled in this environment." });
+  }
   try {
     // Truncate tables using filter constraints that match all uuid/text records
     await supabase.from("email_log").delete().neq("id", "00000000-0000-0000-0000-000000000000");

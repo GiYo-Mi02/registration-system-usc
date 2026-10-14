@@ -1,22 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../server/db.js";
+import { ADMIN_USERNAME, ADMIN_PASSWORD, validateServerConfiguration } from "../server/config.js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-store");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
@@ -28,8 +18,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: "Method not allowed" });
   }
 
-  const { username, password, role } = req.body;
-  if (!username || !password || !role) {
+  try { validateServerConfiguration(); } catch {
+    return res.status(503).json({ success: false, message: "Login service configuration is incomplete." });
+  }
+
+  const { username, password, role } = req.body || {};
+  if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 128 || password.length > 256 || !["admin", "committee"].includes(role)) {
     return res.status(400).json({ success: false, message: "Username, password and role are required." });
   }
 
@@ -41,12 +35,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const sessionToken = `sess_adm_${crypto.randomBytes(16).toString("hex")}`;
-      await supabase.from("committee_sessions").insert({
-        id: `sess_adm_${Date.now()}`,
+      const { error: sessionInsertError } = await supabase.from("committee_sessions").insert({
+        id: `sess_adm_${crypto.randomUUID()}`,
         committee_user_id: "admin-id",
         session_token: sessionToken,
         last_heartbeat: new Date().toISOString()
       });
+      if (sessionInsertError) throw sessionInsertError;
 
       return res.status(200).json({
         success: true,
@@ -78,12 +73,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const sessionToken = `sess_com_${crypto.randomBytes(16).toString("hex")}`;
-      await supabase.from("committee_sessions").insert({
-        id: `sess_com_${Date.now()}`,
+      const { error: sessionInsertError } = await supabase.from("committee_sessions").insert({
+        id: `sess_com_${crypto.randomUUID()}`,
         committee_user_id: user.id,
         session_token: sessionToken,
         last_heartbeat: new Date().toISOString()
       });
+      if (sessionInsertError) throw sessionInsertError;
 
       return res.status(200).json({
         success: true,

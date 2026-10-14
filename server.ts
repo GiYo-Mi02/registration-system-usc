@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import os from "os";
 import { createServer as createViteServer } from "vite";
-import { PORT } from "./server/config";
+import { PORT, validateServerConfiguration } from "./server/config";
 import routes from "./server/routes";
 
 function getLocalIpAddresses() {
@@ -27,11 +27,22 @@ function getLocalIpAddresses() {
 }
 
 async function startServer() {
+  validateServerConfiguration();
   const app = express();
-  app.use(express.json());
+  app.disable("x-powered-by");
+  const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+  if (Number.isInteger(trustedProxyHops) && trustedProxyHops > 0) app.set("trust proxy", trustedProxyHops);
+  app.use(express.json({ limit: "1mb" }));
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
 
   // Mount all API and SSE routes
   app.use(routes);
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ success: false, message: "API endpoint not found." });
+  });
 
   // Vite Integration for HMR and Client Serving
   if (process.env.NODE_ENV !== "production") {
@@ -65,4 +76,5 @@ async function startServer() {
 
 startServer().catch(err => {
   console.error("Express startup failed:", err);
+  process.exitCode = 1;
 });

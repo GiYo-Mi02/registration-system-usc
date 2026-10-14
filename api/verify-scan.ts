@@ -1,17 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../server/db.js";
+import { authorizeApi } from "../server/serverless-auth.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const QR_SECRET = process.env.QR_SECRET || "";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 function signaturesMatch(actual: string, expected: string): boolean {
   if (!/^[a-f0-9]{64}$/i.test(actual)) return false;
@@ -22,7 +17,6 @@ function signaturesMatch(actual: string, expected: string): boolean {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Cache-Control", "no-store");
@@ -40,45 +34,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ success: false, message: "Scanner session is required." });
   }
 
-  const sessionToken = authHeader.substring(7);
   const { token, eventId } = req.body || {};
   if (typeof token !== "string" || !token || typeof eventId !== "string" || !eventId) {
     return res.status(400).json({ success: false, message: "QR token and event are required." });
   }
 
   try {
-    const { data: session, error: sessionError } = await supabase
-      .from("committee_sessions")
-      .select("committee_user_id, last_heartbeat")
-      .eq("session_token", sessionToken)
-      .maybeSingle();
-
-    if (sessionError || !session) {
-      return res.status(401).json({ success: false, message: "Scanner session expired or invalid." });
-    }
-
-    const lastHeartbeat = new Date(session.last_heartbeat).getTime();
-    if (!Number.isFinite(lastHeartbeat) || lastHeartbeat < Date.now() - 5 * 60 * 1000) {
-      await supabase.from("committee_sessions").delete().eq("session_token", sessionToken);
-      return res.status(401).json({ success: false, message: "Scanner session expired due to inactivity." });
-    }
-
-    const scannedBy = session.committee_user_id;
-    if (scannedBy !== "admin-id") {
-      const { data: committeeUser, error: userError } = await supabase
-        .from("committee_users")
-        .select("id, active")
-        .eq("id", scannedBy)
-        .maybeSingle();
-      if (userError || !committeeUser?.active) {
-        return res.status(403).json({ success: false, message: "Scanner account is inactive." });
-      }
-    }
-
-    await supabase
-      .from("committee_sessions")
-      .update({ last_heartbeat: new Date().toISOString() })
-      .eq("session_token", sessionToken);
+    const user = await authorizeApi(req, res);
+    if (!user) return;
+    const scannedBy = user.id;
 
     const parts = token.split(":");
     if (parts.length !== 4) {

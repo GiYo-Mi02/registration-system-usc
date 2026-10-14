@@ -1,3 +1,4 @@
+import { escapeCsvValue } from "../lib/csv";
 import React, { useState, useEffect } from "react";
 import { 
   Users, 
@@ -67,7 +68,7 @@ interface AdminPanelProps {
   onBackToEvents: () => void;
   onLogout: () => void;
   students: Student[];
-  onRefreshStudents: (tokenOverride?: string, eventIdOverride?: string) => Promise<void>;
+  onRefreshStudents: (tokenOverride?: string, eventIdOverride?: string) => Promise<boolean>;
 }
 
 export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogout, students, onRefreshStudents }: AdminPanelProps) {
@@ -660,17 +661,17 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       const scannedTime = student.scanned_at ? new Date(student.scanned_at).toISOString() : "--:--";
       const scannerName = student.scanned_by_name || "N/A";
       
-      const escapedName = student.full_name.replace(/"/g, '""');
-      const escapedEmail = student.email.replace(/"/g, '""');
-      const escapedCollege = student.college.replace(/"/g, '""');
-      const escapedProgram = (student.program || "").replace(/"/g, '""');
-      const escapedYear = (student.year || "").replace(/"/g, '""');
-      const escapedSection = (student.section || "").replace(/"/g, '""');
+      const escapedName = escapeCsvValue(student.full_name);
+      const escapedEmail = escapeCsvValue(student.email);
+      const escapedCollege = escapeCsvValue(student.college);
+      const escapedProgram = escapeCsvValue((student.program || ""));
+      const escapedYear = escapeCsvValue((student.year || ""));
+      const escapedSection = escapeCsvValue((student.section || ""));
       const deliveryStatus = student.delivery_status || (student.email_status === "sent" ? "legacy_sent" : "failed");
-      const escapedMessageId = (student.provider_message_id || "").replace(/"/g, '""');
-      const escapedProviderResponse = (student.provider_response || "").replace(/"/g, '""');
+      const escapedMessageId = escapeCsvValue((student.provider_message_id || ""));
+      const escapedProviderResponse = escapeCsvValue((student.provider_response || ""));
       const lastAttempt = student.last_attempt_at ? new Date(student.last_attempt_at).toISOString() : "";
-      const escapedScanner = scannerName.replace(/"/g, '""');
+      const escapedScanner = escapeCsvValue(scannerName);
       
       csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
     }
@@ -1582,13 +1583,14 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             {/* Modal Header */}
             <div className="p-5 border-b border-brand-accent/10 bg-brand-primary flex justify-between items-center">
               <div>
-                <span className="text-[10px] tracking-widest font-mono uppercase text-brand-accent block">Stored Email Preview</span>
+                <span className="text-[10px] tracking-widest font-mono uppercase text-brand-accent block">Current Design · Saved Entry QR</span>
                 <h3 className="font-serif text-lg font-bold text-brand-text">
-                  Email Preview for {selectedStudentForEmail.full_name}
+                  Ticket Preview for {selectedStudentForEmail.full_name}
                 </h3>
               </div>
               <button
                 onClick={() => setSelectedStudentForEmail(null)}
+                aria-label="Close ticket preview"
                 className="p-2 hover:bg-brand-primary-dark rounded-xl text-brand-text/60 hover:text-brand-text transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1596,20 +1598,20 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             </div>
 
             {/* Modal Body Container */}
-            <div className="flex-1 overflow-y-auto p-6 bg-[#11251c]/50 flex justify-center">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-[#030817] flex justify-center">
               {loadingEmailPreview ? (
                 <div className="flex flex-col items-center justify-center p-12 text-brand-text/50 gap-2">
                   <RefreshCw className="w-8 h-8 animate-spin text-brand-accent" />
-                  <span className="font-mono text-xs">Regenerating Ticket QR...</span>
+                  <span className="font-mono text-xs">Loading ticket preview...</span>
                 </div>
               ) : (
-                <div className="w-full border border-brand-accent/10 rounded-2xl overflow-hidden shadow-inner max-w-lg bg-[#11251c]">
+                <div className="w-full border border-brand-accent/10 rounded-2xl overflow-hidden shadow-inner max-w-lg bg-[#030817]">
                   {/* Embedded Document */}
                   <iframe
                     title="Ticket email preview"
                     srcDoc={emailPreviewHtml}
-                    className="w-full h-[550px] border-0 bg-[#11251c]"
-                    sandbox="allow-same-origin"
+                    className="w-full h-[550px] border-0 bg-[#030817]"
+                    sandbox=""
                   ></iframe>
                 </div>
               )}
@@ -1618,13 +1620,13 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
             {/* Modal Footer Instructions */}
             <div className="p-4 bg-brand-primary border-t border-brand-accent/10 text-center flex flex-col sm:flex-row justify-between items-center gap-3">
               <p className="text-[10px] font-mono text-brand-text/50 max-w-md text-left leading-relaxed">
-                ℹ️ **TESTING GUIDE:** You can scan this QR code directly with your phone camera on the Scanner Panel, or use the Simulator for instant outcomes.
+                Current ticket design with the saved entry QR. Opening this preview does not resend the email.
               </p>
               <button
                 onClick={() => setSelectedStudentForEmail(null)}
                 className="w-full sm:w-auto px-5 py-2.5 bg-brand-accent text-brand-primary-dark text-xs font-bold tracking-wider uppercase rounded-xl hover:bg-brand-accent/90 cursor-pointer shadow"
               >
-                Close Log Preview
+                Close Ticket Preview
               </button>
             </div>
 

@@ -7,13 +7,13 @@ export async function fetchEvents(token: string): Promise<Event[]> {
       headers: { "Authorization": `Bearer ${token}` }
     });
     const data = await res.json();
-    if (data.success) {
+    if (res.ok && data.success && Array.isArray(data.events)) {
       return data.events;
     }
-    return [];
+    throw new Error(data.message || "Failed to load events.");
   } catch (e) {
     console.error("[API] fetchEvents error:", e);
-    return [];
+    throw e;
   }
 }
 
@@ -77,13 +77,13 @@ export async function fetchStudents(token: string, eventId: string): Promise<Stu
       headers: { "Authorization": `Bearer ${token}` }
     });
     const data = await res.json();
-    if (data.success) {
+    if (res.ok && data.success && Array.isArray(data.students)) {
       return data.students;
     }
-    return [];
+    throw new Error(data.message || "Failed to fetch registry.");
   } catch (e) {
     console.error("[API] fetchStudents error:", e);
-    return [];
+    throw e;
   }
 }
 

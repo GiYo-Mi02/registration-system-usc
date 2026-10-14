@@ -73,6 +73,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
     original_time?: string;
     scanned_at?: string;
     scanned_by_name?: string;
+    time_string?: string;
   } | null>(null);
 
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
