@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Calendar, Download, Loader2, MapPin, UserPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Calendar, Check, CheckCircle2, Download, Info, Loader2, MapPin, QrCode, Ticket, UserRound } from "lucide-react";
 import { getPublicEvents, registerWalkIn, restoreWalkIn } from "../lib/walk-in-api";
 import { isEventId, validateWalkInDetails, walkInFields, type PublicEvent, type WalkInDetails, type WalkInTicket } from "../lib/walk-in";
+import "./WalkInRegistration.css";
 
-const inputClass = "w-full rounded-xl border border-brand-accent/20 bg-brand-primary-dark px-4 py-3 text-base text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent";
-const buttonClass = "inline-flex items-center justify-center gap-2 rounded-xl bg-brand-accent px-5 py-3 font-semibold text-brand-primary-dark disabled:opacity-50 disabled:cursor-not-allowed";
+const buttonClass = "registration-button";
 const emptyDetails = (): WalkInDetails => ({ full_name: "", email: "", college: "", program: "", year: "", section: "" });
 const storageKey = (eventId: string) => `walk-in-v1:${eventId}`;
 type Session = { key: string; details: WalkInDetails; stage: "form" | "review"; attempted: boolean };
@@ -30,12 +30,44 @@ function messageFor(error: unknown) {
   return error instanceof Error ? error.message : "Could not connect. Your details are saved in this tab. Please retry.";
 }
 
-function EventDetails({ event }: { event: PublicEvent }) {
-  return <div className="space-y-2">
-    <h2 className="font-serif text-2xl font-bold">{event.name}</h2>
-    <p className="flex items-center gap-2 text-sm text-brand-text/75"><Calendar className="h-4 w-4 shrink-0" />{event.event_date}</p>
-    <p className="flex items-center gap-2 text-sm text-brand-text/75"><MapPin className="h-4 w-4 shrink-0" />{event.venue}</p>
+function EventArtwork({ event }: { event: PublicEvent }) {
+  const [failed, setFailed] = useState(false);
+  return <div className="registration-artwork">
+    {event.banner_url && !failed ? <img src={event.banner_url} alt="" loading="lazy" onError={() => setFailed(true)} />
+      : <div className="registration-artwork-placeholder" aria-hidden="true"><Ticket strokeWidth={1} /><span>University of Makati</span></div>}
   </div>;
+}
+
+function EventDetails({ event }: { event: PublicEvent }) {
+  return <div className="registration-event-details">
+    <h2>{event.name}</h2>
+    <p><Calendar aria-hidden="true" /><span>{event.event_date || "Date to be announced"}</span></p>
+    <p><MapPin aria-hidden="true" /><span>{event.venue || "Venue to be announced"}</span></p>
+  </div>;
+}
+
+function RegistrationProgress({ step }: { step: 1 | 2 | 3 }) {
+  return <ol className="registration-progress" aria-label="Registration progress">
+    {["Your details", "Review", "Admission QR"].map((label, index) => <li key={label} aria-current={step === index + 1 ? "step" : undefined} className={step > index + 1 ? "is-complete" : ""}>
+      <span className="registration-step-number">{step > index + 1 ? <Check aria-hidden="true" /> : index + 1}</span><span>{label}</span>
+    </li>)}
+  </ol>;
+}
+
+function RegistrationLayout({ event, children }: { event: PublicEvent; children: React.ReactNode }) {
+  return <div className="registration-layout">
+    <aside className="registration-summary" aria-label="Selected event">
+      <EventArtwork key={event.banner_url} event={event} />
+      <div className="registration-summary-body"><p className="registration-eyebrow">Your selected event</p><EventDetails event={event} />
+        <div className="registration-summary-note"><QrCode aria-hidden="true" /><p>Keep your QR ready.<br /><span>Present it at the venue to check in.</span></p></div>
+      </div>
+    </aside>
+    <section className="registration-panel">{children}</section>
+  </div>;
+}
+
+function RegistrationNotice({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return <section className="registration-notice"><div className="registration-notice-icon"><Ticket aria-hidden="true" /></div><h1>{title}</h1><div>{children}</div>{action}</section>;
 }
 
 function OpenEvents() {
@@ -52,16 +84,23 @@ function OpenEvents() {
     return () => { active = false; };
   }, [attempt]);
   return <>
-    <h1 className="font-serif text-3xl font-bold">Walk-In Registration</h1>
-    <p className="mt-3 text-brand-text/75">Choose your event to register. No student account is needed.</p>
-    {loading ? <p role="status" className="mt-8 flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" />Loading events…</p>
-      : error ? <div className="mt-8 space-y-4"><p role="alert">{error}</p><button className={buttonClass} onClick={() => setAttempt(value => value + 1)}>Retry</button></div>
-      : events.length === 0 ? <p className="mt-8 rounded-xl border border-brand-accent/20 p-6">No events are accepting walk-ins right now. Please check with the registration committee.</p>
-      : <div className="mt-8 grid gap-5 sm:grid-cols-2">{events.map(event => <article key={event.id} className="flex flex-col gap-5 rounded-2xl border border-brand-accent/20 bg-brand-primary-light p-6">
-        <EventDetails event={event} />
-        <p className="flex-1 whitespace-pre-wrap text-sm text-brand-text/75">{event.description}</p>
-        <a className={buttonClass} href={`/register/${event.id}`}>Register for this event</a>
-      </article>)}</div>}
+    <header className="registration-intro"><p className="registration-eyebrow">Walk-in registration</p><h1>Your next experience<br />starts here.</h1><p>Choose an event, enter your details, and get your admission QR.<br className="registration-desktop-break" /> No account needed.</p>
+      <div className="registration-intro-steps"><span><UserRound aria-hidden="true" />Enter your details</span><ArrowRight aria-hidden="true" /><span><QrCode aria-hidden="true" />Save your QR</span></div>
+    </header>
+    <section aria-labelledby="registration-events-title">
+      <div className="registration-section-heading"><h2 id="registration-events-title">Available events</h2>{!loading && !error && <span>{events.length} {events.length === 1 ? "event" : "events"} open</span>}</div>
+      {loading ? <div role="status" className="registration-loading"><Loader2 className="animate-spin" aria-hidden="true" />Loading events…</div>
+        : error ? <RegistrationNotice title="We couldn't load the events" action={<button className={buttonClass} onClick={() => setAttempt(value => value + 1)}>Try again <ArrowRight aria-hidden="true" /></button>}><p role="alert">{error}</p></RegistrationNotice>
+        : events.length === 0 ? <RegistrationNotice title="Check back soon"><p>No events are accepting walk-ins right now.</p><p>Please check with the registration committee for availability.</p></RegistrationNotice>
+        : <div className={`registration-event-grid${events.length === 1 ? " registration-event-grid-single" : ""}`}>{events.map(event => <article key={event.id} className="registration-event-card">
+          <EventArtwork event={event} />
+          <div className="registration-event-card-body"><span className="registration-open-badge"><span />Open for walk-ins</span><EventDetails event={event} />
+            {event.description && <p className="registration-event-description">{event.description}</p>}
+            <a className={buttonClass} href={`/register/${event.id}`} aria-label={`Register for this event: ${event.name}`}>Register for this event <ArrowRight aria-hidden="true" /></a>
+          </div>
+        </article>)}</div>}
+    </section>
+    <p className="registration-help"><Info aria-hidden="true" />Need help registering? Visit the registration committee at the venue.</p>
   </>;
 }
 
@@ -80,7 +119,12 @@ function EventRegistration({ eventId }: { eventId: string }) {
   const [ready, setReady] = useState(false);
   const submittingRef = useRef(false);
   const activeRef = useRef(true);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const secret = session?.key;
+
+  useEffect(() => {
+    if (session?.stage === "review" || ticket) headingRef.current?.focus();
+  }, [session?.stage, ticket]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -137,53 +181,54 @@ function EventRegistration({ eventId }: { eventId: string }) {
     window.location.assign("/register");
   };
 
-  if (loading) return <p role="status" className="flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin" />Preparing registration…</p>;
-  if (!ready || !session) return <div className="space-y-5"><h1 className="font-serif text-2xl">Registration could not load</h1><p role="alert">{error}</p><button className={buttonClass} onClick={() => session ? setRetry(value => value + 1) : window.location.reload()}>Retry</button></div>;
-  if (ticket) return <section className="mx-auto max-w-xl space-y-6 rounded-2xl border border-brand-accent/25 bg-brand-primary-light p-6 sm:p-8">
-    <p className="text-sm font-semibold uppercase tracking-wider text-brand-accent">Your admission QR</p>
-    <EventDetails event={ticket.event} />
-    <h1 className="break-words text-xl font-bold">{ticket.full_name}</h1>
-    <p role="status">Registration saved. Present this QR to the registration committee to check in.</p>
-    {ticket.scanned_at && <p className="font-semibold text-brand-accent">This ticket has already been checked in. Another scan will show Duplicate Entry.</p>}
-    <div className="rounded-2xl bg-white p-4"><img src={ticket.qr_data_url} alt={`Admission QR for ${ticket.full_name}`} className="mx-auto aspect-square w-full max-w-[360px]" /></div>
-    <a href={ticket.qr_data_url} download={`admission-${ticket.event.id}.png`} className={`${buttonClass} w-full`}><Download className="h-5 w-5" />Download QR</a>
-    <p className="text-sm text-brand-text/75">Keep a downloaded copy. This QR allows one successful check-in for this event. Bring your student ID for committee checking.</p>
-    {error && <p role="alert" className="text-red-200">{error}</p>}
-    <button className="w-full rounded-xl border border-brand-accent/25 px-5 py-3" onClick={finish}>Finish / Clear ticket</button>
-    <p className="text-xs text-brand-text/65">On a shared device, download your QR before clearing this ticket. If you lose it, ask the assistance desk.</p>
-  </section>;
-  if (!event) return <div className="space-y-4"><h1 className="font-serif text-2xl">Walk-in registration is closed</h1><p>This event is not accepting new walk-ins. Please visit the registration committee.</p><button className={buttonClass} onClick={() => setRetry(value => value + 1)}>Check again</button></div>;
-  return <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-brand-accent/20 bg-brand-primary-light p-6 sm:p-8">
-    <p className="text-sm font-semibold uppercase tracking-wider text-brand-accent">{session.stage === "form" ? "Step 1 of 2 · Your details" : "Step 2 of 2 · Review and submit"}</p>
-    <EventDetails event={event} />
-    <p className="text-sm text-brand-text/75">Use the same details as your student records. Your information will be used for event registration and committee check-in.</p>
-    {error && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-950/40 p-4 text-red-200">{error}</p>}
-    {session.stage === "form" ? <form onSubmit={review} className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">{walkInFields.map(field => <div key={field.key} className={field.key === "full_name" || field.key === "email" ? "sm:col-span-2" : ""}>
-        <label htmlFor={`walk-in-${field.key}`} className="mb-2 block text-sm font-semibold">{field.label}</label>
+  if (loading) return <div role="status" className="registration-loading"><Loader2 className="animate-spin" aria-hidden="true" />Preparing registration…</div>;
+  if (!ready || !session) return <RegistrationNotice title="Registration could not load" action={<button className={buttonClass} onClick={() => session ? setRetry(value => value + 1) : window.location.reload()}>Try again</button>}><p role="alert">{error}</p></RegistrationNotice>;
+  if (ticket) return <RegistrationLayout event={ticket.event}>
+    <RegistrationProgress step={3} />
+    <div className="registration-ticket">
+      <CheckCircle2 className="registration-success-icon" aria-hidden="true" />
+      <p className="registration-eyebrow">Registration complete</p><h1 ref={headingRef} tabIndex={-1}>You're on the list.</h1>
+      <p role="status">Registration saved. Present this QR at the venue to check in.</p>
+      <div className="registration-qr"><img src={ticket.qr_data_url} alt={`Admission QR for ${ticket.full_name}`} /><h2>{ticket.full_name}</h2><p>ADMISSION QR · ONE CHECK-IN</p></div>
+      {ticket.scanned_at && <p className="registration-info"><CheckCircle2 aria-hidden="true" />This ticket has already been checked in. Another scan will show Duplicate Entry.</p>}
+      <a href={ticket.qr_data_url} download={`admission-${ticket.event.id}.png`} className={`${buttonClass} registration-button-full`}><Download aria-hidden="true" />Download QR</a>
+      <p className="registration-caption">Save your QR before leaving this page. Bring your student ID for committee checking. No email will be sent.</p>
+      {error && <p role="alert" className="registration-error">{error}</p>}
+      <button className="registration-button registration-button-secondary registration-button-full" onClick={finish}>Finish / Clear ticket</button>
+      <p className="registration-caption">Using a shared device? Download your QR, then clear this ticket. If you lose your copy, visit the assistance desk.</p>
+    </div>
+  </RegistrationLayout>;
+  if (!event) return <RegistrationNotice title="Walk-in registration is closed" action={<button className={buttonClass} onClick={() => setRetry(value => value + 1)}>Check again</button>}><p>This event is not accepting new walk-ins.</p><p>Please visit the registration committee for assistance.</p></RegistrationNotice>;
+  const placeholders: Record<keyof WalkInDetails, string> = { full_name: "Your full name", email: "you@example.com", college: "e.g. CCIS", program: "e.g. BS Computer Science", year: "e.g. 3rd Year", section: "e.g. 3A" };
+  return <RegistrationLayout event={event}>
+    <RegistrationProgress step={session.stage === "form" ? 1 : 2} />
+    <header className="registration-form-heading"><p className="registration-eyebrow">{session.stage === "form" ? "Let's get you registered" : "One last check"}</p><h1 ref={headingRef} tabIndex={-1}>{session.stage === "form" ? "Your details" : "Review your registration"}</h1><p>{session.stage === "form" ? "Enter your details as they appear in your student records. All fields are required." : "Make sure everything is correct before creating your admission QR."}</p></header>
+    {error && <p role="alert" className="registration-error">{error}</p>}
+    {session.stage === "form" ? <form onSubmit={review} className="registration-form">
+      {[{ title: "Personal details", fields: walkInFields.slice(0, 2) }, { title: "Academic details", fields: walkInFields.slice(2) }].map(group => <fieldset key={group.title}><legend>{group.title}</legend><div className="registration-field-grid">{group.fields.map(field => <div key={field.key} className={`registration-field${field.key === "full_name" || field.key === "email" ? " registration-field-wide" : field.key === "college" || field.key === "program" ? " registration-field-wide-mobile" : ""}`}>
+        <label htmlFor={`walk-in-${field.key}`}>{field.label}</label>
         <input id={`walk-in-${field.key}`} name={field.key} type={field.key === "email" ? "email" : "text"} autoComplete={field.key === "full_name" ? "name" : field.key === "email" ? "email" : "off"}
-          required maxLength={field.maxLength} value={session.details[field.key]} className={inputClass}
+          required maxLength={field.maxLength} value={session.details[field.key]} placeholder={placeholders[field.key]} autoCapitalize={field.key === "email" ? "none" : "words"} spellCheck={false}
           onChange={e => save({ ...session, details: { ...session.details, [field.key]: e.target.value } })} />
-      </div>)}</div>
-      <button className={`${buttonClass} w-full`} type="submit">Review registration</button>
-    </form> : <div className="space-y-6">
-      <dl className="divide-y divide-brand-accent/15">{walkInFields.map(field => <div key={field.key} className="grid gap-1 py-3 sm:grid-cols-3"><dt className="text-sm text-brand-text/65">{field.label}</dt><dd className="break-words font-medium sm:col-span-2">{session.details[field.key]}</dd></div>)}</dl>
-      <p className="text-sm text-brand-text/75">Submitting creates your QR. Attendance is recorded only when the committee scans it. No email will be sent.</p>
-      <div className="flex flex-col gap-3 sm:flex-row"><button className="rounded-xl border border-brand-accent/25 px-5 py-3 disabled:opacity-50" disabled={submitting} onClick={() => save({ ...session, stage: "form" })}>Edit details</button>
-        <button className={`${buttonClass} flex-1`} disabled={submitting} onClick={submit}>{submitting ? <><Loader2 className="h-5 w-5 animate-spin" />Creating your QR…</> : "Submit and generate QR"}</button></div>
+      </div>)}</div></fieldset>)}
+      <p className="registration-info"><Info aria-hidden="true" />Your information is used for event registration and committee check-in.</p>
+      <button className={`${buttonClass} registration-button-full`} type="submit">Review registration <ArrowRight aria-hidden="true" /></button>
+    </form> : <div className="registration-review">
+      <dl>{walkInFields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{session.details[field.key]}</dd></div>)}</dl>
+      <p className="registration-info"><QrCode aria-hidden="true" />Submitting creates your QR. Attendance is recorded only when the committee scans it. No email will be sent.</p>
+      <div className="registration-actions"><button className="registration-button registration-button-secondary" disabled={submitting} onClick={() => save({ ...session, stage: "form" })}>Edit details</button>
+        <button className={buttonClass} disabled={submitting} onClick={submit}>{submitting ? <><Loader2 className="animate-spin" aria-hidden="true" />Creating your QR…</> : <>Submit and generate QR <ArrowRight aria-hidden="true" /></>}</button></div>
     </div>}
-  </section>;
+  </RegistrationLayout>;
 }
 
 export default function WalkInRegistration({ eventId }: { eventId?: string }) {
-  return <main className="min-h-screen bg-brand-primary-dark px-4 py-8 text-brand-text sm:py-12">
-    <div className="mx-auto max-w-5xl">
-      <nav aria-label="Registration navigation" className="mb-8 flex flex-wrap items-center justify-between gap-4 text-sm">
-        <a href={eventId ? "/register" : "/"} className="inline-flex items-center gap-2 text-brand-accent"><ArrowLeft className="h-4 w-4" />{eventId ? "All walk-in events" : "Home"}</a>
-        <a href="/" className="text-brand-text/75">Event staff login</a>
-      </nav>
-      <p className="mb-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-brand-accent"><UserPlus className="h-4 w-4" />University of Makati · Participants</p>
-      {!eventId ? <OpenEvents /> : isEventId(eventId) ? <EventRegistration key={eventId} eventId={eventId} /> : <p role="alert">This registration link is invalid. Choose an event from the walk-in events page.</p>}
-    </div>
-  </main>;
+  return <div className="participant-registration">
+    <header className="registration-masthead"><div className="registration-container"><div className="registration-brand"><span className="registration-brand-icon"><Ticket aria-hidden="true" /></span><div><p>University of Makati</p><span>Event registration</span></div></div><span className="registration-participant-label">Participant portal</span></div></header>
+    <main className="registration-container registration-main">
+      {eventId && <a href="/register" className="registration-back"><ArrowLeft aria-hidden="true" />All walk-in events</a>}
+      {!eventId ? <OpenEvents /> : isEventId(eventId) ? <EventRegistration key={eventId} eventId={eventId} /> : <RegistrationNotice title="This link isn't valid"><p role="alert">This registration link is invalid. Choose an event from the walk-in events page.</p><a href="/register" className={buttonClass}>View available events <ArrowRight aria-hidden="true" /></a></RegistrationNotice>}
+    </main>
+    <footer className="registration-footer"><div className="registration-container"><p>University of Makati</p><span>Walk-in event registration</span></div></footer>
+  </div>;
 }
