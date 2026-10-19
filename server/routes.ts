@@ -1,6 +1,8 @@
 import { escapeCsvValue } from "../src/lib/csv";
 import { renderTicketPreview } from "./ticket-preview";
 import express from "express";
+import { publicEvents, walkInRegistration, setWalkInAvailability } from "./walk-in";
+import { excludeUnrequestedEmails } from "./email-selection";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import QRCode from "qrcode";
@@ -25,6 +27,17 @@ import {
 } from "./helpers";
 
 const router = express.Router();
+
+router.get("/api/public-events", (req, res) => publicEvents(req, res, supabase));
+router.all("/api/walk-in-registration", (req, res) => walkInRegistration(req, res, supabase, req.ip || req.socket.remoteAddress || "unknown"));
+router.patch("/api/events", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const result = await setWalkInAvailability(supabase, req.query.id, req.body?.walk_in_open);
+    return res.status(result.status).json(result.body);
+  } catch {
+    return res.status(503).json({ success: false, message: "Walk-in availability could not be saved." });
+  }
+});
 
 // Real-time server-sent events client pool
 let sseClients: express.Response[] = [];
@@ -752,7 +765,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
 
         const { data: existingEmailLog } = await supabase
           .from("email_log")
-          .select("qr_data_url")
+          .select("qr_data_url, delivery_status")
           .eq("student_id", existing.id)
           .maybeSingle();
 
@@ -774,7 +787,7 @@ router.post(["/api/students/import-csv", "/api/import-csv"], authenticateToken, 
             .update({ email_html: refreshedEmailHtml })
             .eq("student_id", existing.id);
 
-          if (!skipEmails) {
+          if (!skipEmails && existingEmailLog.delivery_status !== "not_requested") {
             if (isEmailQuotaExceeded()) {
               const quotaMessage = "Daily user sending limit exceeded (550 5.4.5)";
               await supabase.from("students")
@@ -939,7 +952,7 @@ router.post(["/api/students/resend-bulk", "/api/resend-bulk"], authenticateToken
   resetEmailQuota();
 
   try {
-    const uniqueStudentIds = Array.from(new Set(studentIds)) as string[];
+    const uniqueStudentIds = await excludeUnrequestedEmails(supabase, Array.from(new Set(studentIds)) as string[]);
     const { data: studentsList, error: stdError } = await supabase
       .from("students")
       .select("*")
@@ -1213,6 +1226,7 @@ router.post("/api/reset-emails", authenticateToken, requireAdmin, async (req, re
       studentIds = (students || []).map(s => s.id);
     }
 
+    studentIds = await excludeUnrequestedEmails(supabase, studentIds);
     if (studentIds.length > 0) {
       const chunkSize = 100;
       for (let i = 0; i < studentIds.length; i += chunkSize) {

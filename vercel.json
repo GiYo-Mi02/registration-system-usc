@@ -2,6 +2,13 @@
   "version": 2,
   "buildCommand": "npm run build:client",
   "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/public-events", "destination": "/api/registration?operation=public-events" },
+    { "source": "/api/walk-in-registration", "destination": "/api/registration?operation=walk-in-registration" },
+    { "source": "/api/email-preview", "destination": "/api/registration?operation=email-preview" },
+    { "source": "/register", "destination": "/index.html" },
+    { "source": "/register/:eventId", "destination": "/index.html" }
+  ],
   "functions": {
     "api/**/*.ts": {
       "includeFiles": "public/ccisixplore.jpg",

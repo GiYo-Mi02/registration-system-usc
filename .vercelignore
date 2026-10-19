@@ -1,0 +1,15 @@
+.git
+.vercel
+.env
+.env.*
+.npm-cache
+node_modules
+scratch
+build
+dist
+coverage
+tests
+supabase
+previews
+*.csv
+*.log

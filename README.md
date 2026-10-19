@@ -4,6 +4,8 @@ React/Vite registration and QR check-in frontend, Express backend for local/pers
 
 See [AUDIT.md](AUDIT.md) for the completed repairs, verification evidence, production blockers, and full hosting runbook.
 
+Student self-service walk-ins are available through **Register as a Walk-In** on the homepage. Administrators open registration per event; students receive a downloadable QR for the existing committee scanner. Before using the feature, follow [walk-in database setup and verification](WALK_IN_REGISTRATION.md). No email is sent automatically.
+
 ## Development
 
 Use Node 22.12+ or Node 24 within the supported package range. On Windows:

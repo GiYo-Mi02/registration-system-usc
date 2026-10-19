@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Plus, Edit3, Trash2, Calendar, MapPin, LogOut, Loader2, Sparkles } from "lucide-react";
 import { Event, AuthState } from "../types";
-import { fetchEvents as fetchEventsFromApi, updateEvent, createEvent, deleteEvent } from "../lib/api";
+import { fetchEvents as fetchEventsFromApi, updateEvent, createEvent, deleteEvent, setWalkInOpen } from "../lib/api";
 
 interface EventsMenuProps {
   auth: AuthState;
@@ -25,6 +25,25 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
   const [description, setDescription] = useState("");
   const [bannerUrl, setBannerUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [walkInBusy, setWalkInBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+
+  const toggleWalkIn = async (event: Event) => {
+    if (walkInBusy) return;
+    setWalkInBusy(event.id); setNotice(""); setError(null);
+    try {
+      const updated = await setWalkInOpen(auth.token || "", event.id, !event.walk_in_open);
+      setEvents(current => current.map(item => item.id === event.id ? updated : item));
+      setNotice(`Walk-in registration ${updated.walk_in_open ? "opened" : "closed"} for ${event.name}.`);
+    } catch (error) { setError(error instanceof Error ? error.message : "Could not change walk-in availability."); }
+    finally { setWalkInBusy(null); }
+  };
+
+  const copyRegistrationLink = async (event: Event) => {
+    const link = `${window.location.origin}/register/${event.id}`;
+    try { await navigator.clipboard.writeText(link); setNotice("Registration link copied."); }
+    catch { window.prompt("Copy this registration link:", link); }
+  };
 
   useEffect(() => {
     if (auth.token) {
@@ -146,6 +165,7 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
 
       {/* Main Body Grid */}
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
+        {notice && <p role="status" className="mb-6 rounded-xl border border-brand-accent/20 p-4 text-sm text-brand-accent">{notice}</p>}
         {error && (
           <div className="mb-8 p-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-200 text-sm">
             <strong>Failed loading Events:</strong> {error}
@@ -239,6 +259,15 @@ export default function EventsMenu({ auth, onSelectEvent, onLogout }: EventsMenu
                     </div>
                   </div>
 
+                  {isAdmin && <div className="mb-4 space-y-3 rounded-xl border border-brand-accent/20 p-3">
+                    <p className="text-xs font-semibold">Walk-ins: {event.walk_in_open ? "Open" : "Closed"}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" disabled={walkInBusy !== null} onClick={() => void toggleWalkIn(event)} className="rounded-lg bg-brand-primary-dark px-3 py-2 text-xs text-brand-accent disabled:opacity-50">
+                        {walkInBusy === event.id ? "Saving…" : event.walk_in_open ? "Close Walk-In Registration" : "Open Walk-In Registration"}
+                      </button>
+                      <button type="button" onClick={() => void copyRegistrationLink(event)} className="rounded-lg border border-brand-accent/20 px-3 py-2 text-xs">Copy Registration Link</button>
+                    </div>
+                  </div>}
                   <div className="flex gap-2">
                     <button
                       onClick={() => onSelectEvent(event)}

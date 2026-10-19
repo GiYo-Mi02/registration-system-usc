@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import QRCode from "qrcode";
 import crypto from "crypto";
 import { supabase } from "../server/db.js";
+import { excludeUnrequestedEmails } from "../server/email-selection.js";
 import { authorizeApi } from "../server/serverless-auth.js";
 import {
   failedDeliveryAttemptArgs,
@@ -47,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   resetEmailQuota();
 
   try {
-    const uniqueStudentIds = Array.from(new Set(studentIds));
+    const uniqueStudentIds = await excludeUnrequestedEmails(supabase, Array.from(new Set(studentIds)) as string[]);
     const { data: studentsList, error: stdError } = await supabase
       .from("students")
       .select("*")

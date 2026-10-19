@@ -93,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const { data: existingEmailLog } = await supabase
             .from("email_log")
-            .select("qr_data_url")
+            .select("qr_data_url, delivery_status")
             .eq("student_id", existing.id)
             .maybeSingle();
 
@@ -115,7 +115,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .update({ email_html: refreshedEmailHtml })
               .eq("student_id", existing.id);
 
-            if (!skipEmails) {
+            if (!skipEmails && existingEmailLog.delivery_status !== "not_requested") {
               if (isEmailQuotaExceeded()) {
                 const quotaMessage = "Daily user sending limit exceeded (550 5.4.5)";
                 await supabase.from("students")

@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabase } from "../server/db.js";
-import { authorizeApi } from "../server/serverless-auth.js";
-import { renderTicketPreview } from "../server/ticket-preview.js";
+import { supabase } from "./db.js";
+import { authorizeApi } from "./serverless-auth.js";
+import { renderTicketPreview } from "./ticket-preview.js";
 
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

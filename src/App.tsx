@@ -4,11 +4,18 @@ import LoginScreen from "./components/LoginScreen";
 import EventsMenu from "./components/EventsMenu";
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
 const ScannerPanel = lazy(() => import("./components/ScannerPanel"));
+const WalkInRegistration = lazy(() => import("./components/WalkInRegistration"));
 import { ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
 import { logoutUser, sendHeartbeat } from "./lib/auth";
 import { fetchStudents } from "./lib/api";
 
 export default function App() {
+  const route = window.location.pathname.match(/^\/register(?:\/([^/]+))?\/?$/);
+  if (route) return <Suspense fallback={<p role="status" className="p-8">Loading registration…</p>}><WalkInRegistration eventId={route[1]} /></Suspense>;
+  return <StaffApp />;
+}
+
+function StaffApp() {
   const registryRequestRef = useRef(0);
   const [auth, setAuth] = useState<AuthState>({
     isAuthenticated: false,

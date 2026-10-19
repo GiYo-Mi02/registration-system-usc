@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "../server/db.js";
+import { excludeUnrequestedEmails } from "../server/email-selection.js";
 import { authorizeApi } from "../server/serverless-auth.js";
 
 
@@ -54,6 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       studentIds = (students || []).map(s => s.id);
     }
 
+    studentIds = await excludeUnrequestedEmails(supabase, studentIds);
     if (studentIds.length > 0) {
       const chunkSize = 100;
       for (let i = 0; i < studentIds.length; i += chunkSize) {

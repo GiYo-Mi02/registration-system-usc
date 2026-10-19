@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "../server/db.js";
 import { authorizeApi } from "../server/serverless-auth.js";
+import { setWalkInAvailability } from "../server/walk-in.js";
 
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") {
@@ -14,6 +15,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!await authorizeApi(req, res, req.method !== "GET")) return;
 
   try {
+    if (req.method === "PATCH") {
+      const result = await setWalkInAvailability(supabase, req.query.id, req.body?.walk_in_open);
+      return res.status(result.status).json(result.body);
+    }
     // ─── GET: FETCH ALL EVENTS ──────────────────────────────────────────────
     if (req.method === "GET") {
       const { data, error } = await supabase

@@ -1,5 +1,16 @@
 import { Student, Event } from "../types";
 
+export async function setWalkInOpen(token: string, eventId: string, open: boolean): Promise<Event> {
+  const response = await fetch(`/api/events?id=${encodeURIComponent(eventId)}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ walk_in_open: open })
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(data.message || "Could not update walk-in registration.");
+  return data.event;
+}
+
 // ─── EVENTS ────────────────────────────────────────────────────────────────
 export async function fetchEvents(token: string): Promise<Event[]> {
   try {

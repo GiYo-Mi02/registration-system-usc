@@ -1,4 +1,5 @@
 import { escapeCsvValue } from "../lib/csv";
+import { isEmailFailure, isEmailNotRequested } from "../lib/walk-in";
 import React, { useState, useEffect } from "react";
 import { 
   Users, 
@@ -157,9 +158,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   if (emailFilter) {
     if (emailFilter === "failed") {
-      filtered = filtered.filter(s =>
-        s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || "")
-      );
+      filtered = filtered.filter(isEmailFailure);
+    } else if (emailFilter === "not_requested") {
+      filtered = filtered.filter(isEmailNotRequested);
     } else {
       filtered = filtered.filter(s => s.email_status === emailFilter);
     }
@@ -174,13 +175,14 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
   // Compute Statistics
   const emailsSent = students.filter(s => s.delivery_status === "smtp_accepted").length;
   const emailsLegacySent = students.filter(s => s.delivery_status === "legacy_sent" || (!s.delivery_status && s.email_status === "sent")).length;
-  const emailsFailed = students.filter(s =>
-    s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || "")
-  ).length;
+  const emailsFailed = students.filter(isEmailFailure).length;
+  const emailsNotRequested = students.filter(isEmailNotRequested).length;
+  const emailRecipients = students.length - emailsNotRequested;
+  const unattendedEmailRecipients = students.filter(s => !isEmailNotRequested(s) && !s.scanned_at).length;
   const emailsQueued = students.filter(s =>
     s.email_status === "failed" && (s.delivery_status === "queued" || ["queued", "sending"].includes(s.email_error || ""))
   ).length;
-  const totalUnsent = students.filter(s => s.email_status === "failed").length;
+  const totalUnsent = students.filter(s => s.email_status === "failed" && !isEmailNotRequested(s)).length;
 
   const stats: Stats = {
     total: students.length,
@@ -188,7 +190,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     attendanceRate: students.length > 0 ? Math.round((students.filter(s => s.scanned_at !== null && s.scanned_at !== undefined).length / students.length) * 100) : 0,
     emailsSent,
     emailsFailed,
-    emailSuccessRate: students.length > 0 ? Math.round((emailsSent / students.length) * 100) : 0,
+    emailSuccessRate: emailRecipients > 0 ? Math.round((emailsSent / emailRecipients) * 100) : 0,
   };
 
   // 1. Manual Add Form submit
@@ -448,8 +450,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     isDispatchingRef.current = true;
 
     const targetStudents = target === "not_attended"
-      ? students.filter(s => s.scanned_at === null || s.scanned_at === undefined)
-      : students.filter(s => s.email_status === "failed");
+      ? students.filter(s => !isEmailNotRequested(s) && (s.scanned_at === null || s.scanned_at === undefined))
+      : students.filter(s => !isEmailNotRequested(s) && s.email_status === "failed");
     const targetCount = targetStudents.length;
 
     if (targetCount === 0) {
@@ -740,7 +742,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 {totalUnsent > 0 ? (
                   <>Queue: <span className="text-brand-accent font-bold">{totalUnsent}</span> failed/queued. Unattended: <span className="text-brand-accent font-bold">{stats.total - stats.attended}</span> students.</>
                 ) : (
-                  <>✨ All sent. Unattended: <span className="text-brand-accent font-bold">{stats.total - stats.attended}</span> students.</>
+                  <>No email deliveries queued. Not requested: <span className="text-brand-accent font-bold">{emailsNotRequested}</span>.</>
                 )}
               </p>
             </div>
@@ -763,12 +765,12 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                       ▶️ Dispatch Failed ({totalUnsent})
                     </button>
                   )}
-                  {stats.total - stats.attended > 0 && (
+                  {unattendedEmailRecipients > 0 && (
                     <button
                       onClick={() => startEmailDispatch("not_attended")}
                       className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs tracking-wider uppercase rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                     >
-                      📧 Resend Unattended ({stats.total - stats.attended})
+                      📧 Resend Unattended ({unattendedEmailRecipients})
                     </button>
                   )}
                   <button
@@ -882,10 +884,10 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           <div className="space-y-2">
             <div className="flex justify-between items-end text-xs font-mono">
               <span className="text-brand-text/80">
-                Processed: <span className="font-bold text-brand-text">{(emailsSent + emailsLegacySent + emailsFailed)}</span> / {stats.total}
+                Processed: <span className="font-bold text-brand-text">{(emailsSent + emailsLegacySent + emailsFailed)}</span> / {emailRecipients} email recipients · {emailsNotRequested} not requested
               </span>
               <span className="text-brand-accent font-bold">
-                {Math.round((stats.total > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / stats.total) * 100 : 0))}% Complete
+                {Math.round((emailRecipients > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / emailRecipients) * 100 : 0))}% Complete
               </span>
             </div>
             
@@ -893,22 +895,22 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               {/* SMTP-accepted progress (green) */}
               <div 
                 className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500 ease-out absolute left-0 top-0"
-                style={{ width: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%` }}
+                style={{ width: `${emailRecipients > 0 ? (emailsSent / emailRecipients) * 100 : 0}%` }}
               />
               {/* Historical sent rows without a provider receipt (amber) */}
               <div
                 className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-500 ease-out absolute top-0"
                 style={{
-                  left: `${stats.total > 0 ? (emailsSent / stats.total) * 100 : 0}%`,
-                  width: `${stats.total > 0 ? (emailsLegacySent / stats.total) * 100 : 0}%`
+                  left: `${emailRecipients > 0 ? (emailsSent / emailRecipients) * 100 : 0}%`,
+                  width: `${emailRecipients > 0 ? (emailsLegacySent / emailRecipients) * 100 : 0}%`
                 }}
               />
               {/* Failed progress (red) */}
               <div 
                 className="h-full bg-gradient-to-r from-red-500 to-rose-450 transition-all duration-500 ease-out absolute"
                 style={{ 
-                  left: `${stats.total > 0 ? ((emailsSent + emailsLegacySent) / stats.total) * 100 : 0}%`,
-                  width: `${stats.total > 0 ? (emailsFailed / stats.total) * 100 : 0}%` 
+                  left: `${emailRecipients > 0 ? ((emailsSent + emailsLegacySent) / emailRecipients) * 100 : 0}%`,
+                  width: `${emailRecipients > 0 ? (emailsFailed / emailRecipients) * 100 : 0}%`
                 }}
               />
               {/* Pulsing indicator if active */}
@@ -916,8 +918,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <div 
                   className="h-full bg-blue-400/30 absolute animate-pulse"
                   style={{
-                    left: `${stats.total > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / stats.total) * 100 : 0}%`,
-                    width: `${stats.total > 0 ? (emailsQueued / stats.total) * 100 : 0}%`
+                    left: `${emailRecipients > 0 ? ((emailsSent + emailsLegacySent + emailsFailed) / emailRecipients) * 100 : 0}%`,
+                    width: `${emailRecipients > 0 ? (emailsQueued / emailRecipients) * 100 : 0}%`
                   }}
                 />
               )}
@@ -954,7 +956,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               
               <div className="max-h-[220px] overflow-y-auto border border-brand-text/10 rounded-2xl bg-brand-primary-dark/40 shadow-inner divide-y divide-brand-text/5 text-[11px] font-mono">
                 {students
-                  .filter(s => s.email_status === "failed" && s.delivery_status !== "queued" && !["queued", "sending"].includes(s.email_error || ""))
+                  .filter(isEmailFailure)
                   .map(student => (
                     <div key={student.id} className="p-3 flex justify-between items-center gap-4 hover:bg-brand-text/5 transition-all">
                       <div className="flex flex-col min-w-0">
@@ -1405,6 +1407,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               <option value="">All Email Delivery States</option>
               <option value="sent">SMTP Accepted / Legacy Sent</option>
               <option value="failed">Queued / Failed / Simulated</option>
+              <option value="not_requested">Not requested (walk-in)</option>
             </select>
           </div>
 
@@ -1449,7 +1452,9 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                     <td className="px-6 py-3.5 text-brand-text/60 font-mono">{s.year || "Not provided"}</td>
                     <td className="px-6 py-3.5 text-brand-text/60 font-mono">{s.section || "Not provided"}</td>
                     <td className="px-6 py-3.5 text-center">
-                      {s.delivery_status === "smtp_accepted" ? (
+                      {isEmailNotRequested(s) ? (
+                        <span className="inline-flex items-center rounded-full border border-brand-accent/20 px-2 py-1 text-[10px] text-brand-text/70">Not requested</span>
+                      ) : s.delivery_status === "smtp_accepted" ? (
                         <span
                           title={`Accepted by SMTP provider, not confirmed in Inbox.${s.provider_message_id ? ` Message ID: ${s.provider_message_id}` : ""}${s.provider_response ? ` Response: ${s.provider_response}` : ""}`}
                           className="inline-flex items-center gap-1 bg-green-950/40 text-green-300 px-2.5 py-1 rounded-full border border-green-500/20 text-[10px] font-semibold cursor-help"

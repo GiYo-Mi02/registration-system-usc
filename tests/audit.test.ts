@@ -88,7 +88,7 @@ function responseRecorder() {
 }
 const { supabase } = await import("../server/db");
 const endpointMethods = [
-  ["events", "POST"], ["events", "PUT"], ["events", "DELETE"],
+  ["events", "POST"], ["events", "PUT"], ["events", "PATCH"], ["events", "DELETE"],
   ["students", "GET"], ["students", "DELETE"], ["manual-add", "POST"],
   ["import-csv", "POST"], ["resend", "POST"], ["resend-bulk", "POST"],
   ["reset-emails", "POST"], ["reset-db", "POST"], ["email-preview", "GET"]
@@ -97,9 +97,9 @@ for (const [endpoint, method] of endpointMethods) {
   test(`Vercel ${method} /api/${endpoint} rejects scanner access before data mutation`, async () => {
     const fake = fakeDatabase();
     supabase.from = fake.client.from;
-    const { default: handler } = await import(`../api/${endpoint}.ts`);
+    const { default: handler } = await import(`../api/${endpoint === "email-preview" ? "registration" : endpoint}.ts`);
     const { response, record } = responseRecorder();
-    await handler({ method, headers: { authorization: "Bearer scanner-token" }, query: {}, body: {} } as VercelRequest, response);
+    await handler({ method, headers: { authorization: "Bearer scanner-token" }, query: endpoint === "email-preview" ? { operation: "email-preview" } : {}, body: {} } as VercelRequest, response);
     assert.equal(record.status, 403);
     assert.equal(record.headers["Cache-Control"], "no-store");
     assert.ok(fake.calls.every(call => call.startsWith("committee_")));

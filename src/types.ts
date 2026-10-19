@@ -10,7 +10,7 @@ export interface Student {
   imported_at: string;
   email_status: "sent" | "failed";
   email_error?: string;
-  delivery_status?: "queued" | "smtp_accepted" | "failed" | "simulated" | "legacy_sent" | null;
+  delivery_status?: "queued" | "smtp_accepted" | "failed" | "simulated" | "legacy_sent" | "not_requested" | null;
   provider_message_id?: string | null;
   provider_response?: string | null;
   last_attempt_at?: string | null;
@@ -50,4 +50,5 @@ export interface Event {
   venue: string;
   banner_url: string;
   created_at?: string;
+  walk_in_open?: boolean;
 }
