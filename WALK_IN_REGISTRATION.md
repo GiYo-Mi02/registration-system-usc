@@ -1,6 +1,16 @@
 # Student walk-in registration
 
-Students enter through **Register as a Walk-In** on the homepage, choose an open event, enter Name, Email, College, Program, Year and Section, review their details, then receive a downloadable admission QR. Registration saves a participant; committee scanning records attendance. There is no student account or automatic email.
+Students enter through **Register as a Walk-In** on the homepage, choose an open event, read the privacy notice and explicitly agree, enter Name, Email, College, Program, Year and Section, review their details, then receive a downloadable admission QR. Registration saves a participant; committee scanning records attendance. There is no student account or automatic email.
+
+## Privacy agreement before the form
+
+Direct event links and event-card navigation show the privacy notice before any participant inputs are rendered. The checkbox starts unchecked; **I agree and continue** stays disabled until it is checked. **Decline and return to events** clears that event's local draft/receipt. Consent is scoped to the event, browser tab, and notice version; an old draft without current consent must show the notice again. Existing issued tickets remain recoverable without a new registration or forced re-consent. The form offers **View privacy notice** to read it again.
+
+The notice references [Republic Act No. 10173, the Data Privacy Act of 2012](https://privacy.gov.ph/data-privacy-act/). It describes the six collected fields, event registration/QR/attendance purposes, confidentiality and restricted access, and privacy rights. The user-confirmed privacy contact is [ggonzales.k12254495@umak.edu.ph](mailto:ggonzales.k12254495@umak.edu.ph), with the committee assistance desk available at the venue. It does not guarantee that a security breach is impossible or claim a completed legal compliance review.
+
+The seven-day retention period is the organizer's stated policy, not a retention period mandated by RA 10173. The user confirmed that the deletion scope is **walk-in registrations only**, including their related QR, attendance and saved ticket records. **There is no automatic deletion scheduler in this version.** Event dates are currently display text, so a deletion deadline must not be guessed from them. Organizers must arrange deletion seven days after the confirmed event end and handle organizer-held exports/backups consistently with that commitment. A production retention rollout still needs a confirmed event end time and backup policy. No existing participant data is deleted by this UI change.
+
+The agreement is remembered in session storage so the UI can gate the form; it is not a server-side consent audit record or an API authorization mechanism. The notice version was updated when the walk-in-only retention scope and privacy email were confirmed.
 
 ## Database setup and release order
 

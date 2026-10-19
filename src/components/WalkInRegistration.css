@@ -117,6 +117,24 @@
 .registration-qr h2 { font-size: 16px; font-weight: 750; margin-top: 10px; }
 .registration-qr p { color: #61735c; font-size: 9px; letter-spacing: .12em; margin-top: 8px; }
 .registration-caption { color: var(--registration-muted); font-size: 11px; line-height: 1.8; margin-block: 14px 20px !important; }
+.registration-privacy-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #355c3e; background: #edf3e6; border-radius: 13px; margin-bottom: 20px; }
+.registration-privacy-icon svg { width: 27px; height: 27px; }
+.registration-privacy-law { display: flex; align-items: flex-start; gap: 10px; padding: 15px 0 20px; margin-top: 14px !important; border-bottom: 1px solid var(--registration-line); font-size: 11px; line-height: 1.8; color: var(--registration-muted); }
+.registration-privacy-law > svg { margin-top: 3px; }
+.registration-privacy-law a { color: #245835; font-size: 12px; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
+.registration-privacy-law a svg { display: inline; width: 13px; height: 13px; margin-left: 4px; }
+.registration-privacy-sections { display: grid; gap: 22px; margin-block: 24px; }
+.registration-privacy-sections h2 { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 750; margin-bottom: 9px; }
+.registration-privacy-sections h2 svg { width: 16px; height: 16px; }
+.registration-privacy-sections p { font-size: 12px; line-height: 1.9; color: var(--registration-muted); }
+.registration-privacy-sections p + p { margin-top: 9px; }
+.registration-privacy-retention { border-left: 3px solid #d5ae20; padding: 14px 16px; background: #faf6e7; border-radius: 0 8px 8px 0; }
+.registration-privacy-agreement { display: grid; gap: 12px; border-top: 1px solid var(--registration-line); padding-top: 22px; }
+.registration-consent-label { display: flex; align-items: flex-start; gap: 12px; padding: 15px; border: 1px solid #b8c8b1; border-radius: 10px; cursor: pointer; background: #f4f7ef; margin-bottom: 8px; }
+.registration-consent-label input { width: 20px; height: 20px; flex-shrink: 0; margin: 2px 0 0; accent-color: #285335; cursor: pointer; }
+.registration-consent-label span { font-size: 12px; line-height: 1.9; }
+.registration-privacy-link { display: inline; color: #245835; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.registration-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .registration-notice { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 18px; padding: 50px 24px; border: 1px solid var(--registration-line); background: #fffef9; border-radius: 18px; }
 .registration-notice-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; background: #edf2e7; color: #4f7449; }
 .registration-notice h1 { font-family: var(--font-serif); font-size: 28px; line-height: 1.3; }

@@ -2,12 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Calendar, Check, CheckCircle2, Download, Info, Loader2, MapPin, QrCode, Ticket, UserRound } from "lucide-react";
 import { getPublicEvents, registerWalkIn, restoreWalkIn } from "../lib/walk-in-api";
 import { isEventId, validateWalkInDetails, walkInFields, type PublicEvent, type WalkInDetails, type WalkInTicket } from "../lib/walk-in";
+import { hasRegistrationPrivacyConsent, REGISTRATION_PRIVACY_VERSION, type RegistrationPrivacyConsent } from "../lib/registration-privacy";
+import RegistrationPrivacyNotice from "./RegistrationPrivacyNotice";
 import "./WalkInRegistration.css";
 
 const buttonClass = "registration-button";
 const emptyDetails = (): WalkInDetails => ({ full_name: "", email: "", college: "", program: "", year: "", section: "" });
 const storageKey = (eventId: string) => `walk-in-v1:${eventId}`;
-type Session = { key: string; details: WalkInDetails; stage: "form" | "review"; attempted: boolean };
+type Session = { key: string; details: WalkInDetails; stage: "form" | "review"; attempted: boolean; privacyConsent?: RegistrationPrivacyConsent };
 
 function loadSession(eventId: string): Session {
   const saved = sessionStorage.getItem(storageKey(eventId));
@@ -15,7 +17,8 @@ function loadSession(eventId: string): Session {
     try {
       const parsed = JSON.parse(saved);
       if (/^[a-f0-9]{64}$/.test(parsed.key) && walkInFields.every(field => typeof parsed.details?.[field.key] === "string")) {
-        return { key: parsed.key, details: parsed.details, stage: parsed.stage === "review" ? "review" : "form", attempted: parsed.attempted === true };
+        return { key: parsed.key, details: parsed.details, stage: parsed.stage === "review" ? "review" : "form", attempted: parsed.attempted === true,
+          privacyConsent: hasRegistrationPrivacyConsent(parsed.privacyConsent) ? parsed.privacyConsent : undefined };
       }
     } catch { /* Replace an invalid cached draft without accessing another ticket. */ }
   }
@@ -117,14 +120,16 @@ function EventRegistration({ eventId }: { eventId: string }) {
   const [error, setError] = useState(initial.error);
   const [retry, setRetry] = useState(0);
   const [ready, setReady] = useState(false);
+  const [privacyVisible, setPrivacyVisible] = useState(false);
   const submittingRef = useRef(false);
   const activeRef = useRef(true);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const secret = session?.key;
+  const privacyAccepted = hasRegistrationPrivacyConsent(session?.privacyConsent);
 
   useEffect(() => {
-    if (session?.stage === "review" || ticket) headingRef.current?.focus();
-  }, [session?.stage, ticket]);
+    if ((privacyAccepted && !privacyVisible) || ticket) headingRef.current?.focus();
+  }, [session?.stage, privacyAccepted, privacyVisible, ticket]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -160,13 +165,13 @@ function EventRegistration({ eventId }: { eventId: string }) {
   };
   const review = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!session) return;
+    if (!session || !privacyAccepted) return;
     const result = validateWalkInDetails(session.details);
     if (!result.details) { setError(result.message || "Please check your details."); return; }
     setError(""); save({ ...session, details: result.details, stage: "review" });
   };
   const submit = async () => {
-    if (!session || submittingRef.current || !ready) return;
+    if (!session || !privacyAccepted || submittingRef.current || !ready) return;
     if (!save({ ...session, attempted: true })) return;
     submittingRef.current = true; setSubmitting(true); setError("");
     try {
@@ -179,6 +184,17 @@ function EventRegistration({ eventId }: { eventId: string }) {
     try { sessionStorage.removeItem(storageKey(eventId)); }
     catch { setError("Could not clear this ticket. Close this browser tab before handing the device to someone else."); return; }
     window.location.assign("/register");
+  };
+
+  const agreeToPrivacyNotice = () => {
+    if (!session) return;
+    setError("");
+    // Do not reveal the form unless consent can be preserved with this draft.
+    const next: Session = { ...session, privacyConsent: { version: REGISTRATION_PRIVACY_VERSION, accepted: true } };
+    try {
+      sessionStorage.setItem(storageKey(eventId), JSON.stringify(next));
+      setSession(next); setPrivacyVisible(false);
+    } catch { setError("Your browser could not save your agreement. Enable session storage and try again, or visit the assistance desk."); }
   };
 
   if (loading) return <div role="status" className="registration-loading"><Loader2 className="animate-spin" aria-hidden="true" />Preparing registration…</div>;
@@ -199,6 +215,9 @@ function EventRegistration({ eventId }: { eventId: string }) {
     </div>
   </RegistrationLayout>;
   if (!event) return <RegistrationNotice title="Walk-in registration is closed" action={<button className={buttonClass} onClick={() => setRetry(value => value + 1)}>Check again</button>}><p>This event is not accepting new walk-ins.</p><p>Please visit the registration committee for assistance.</p></RegistrationNotice>;
+  if (!privacyAccepted || privacyVisible) return <RegistrationLayout event={event}>
+    <RegistrationPrivacyNotice key={eventId} eventName={event.name} onAgree={agreeToPrivacyNotice} onDecline={finish} error={error} />
+  </RegistrationLayout>;
   const placeholders: Record<keyof WalkInDetails, string> = { full_name: "Your full name", email: "you@example.com", college: "e.g. CCIS", program: "e.g. BS Computer Science", year: "e.g. 3rd Year", section: "e.g. 3A" };
   return <RegistrationLayout event={event}>
     <RegistrationProgress step={session.stage === "form" ? 1 : 2} />
@@ -211,7 +230,7 @@ function EventRegistration({ eventId }: { eventId: string }) {
           required maxLength={field.maxLength} value={session.details[field.key]} placeholder={placeholders[field.key]} autoCapitalize={field.key === "email" ? "none" : "words"} spellCheck={false}
           onChange={e => save({ ...session, details: { ...session.details, [field.key]: e.target.value } })} />
       </div>)}</div></fieldset>)}
-      <p className="registration-info"><Info aria-hidden="true" />Your information is used for event registration and committee check-in.</p>
+      <p className="registration-info"><Info aria-hidden="true" /><span>Your information is used for event registration and committee check-in. <button type="button" className="registration-privacy-link" onClick={() => setPrivacyVisible(true)}>View privacy notice</button></span></p>
       <button className={`${buttonClass} registration-button-full`} type="submit">Review registration <ArrowRight aria-hidden="true" /></button>
     </form> : <div className="registration-review">
       <dl>{walkInFields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{session.details[field.key]}</dd></div>)}</dl>
