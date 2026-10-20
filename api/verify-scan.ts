@@ -78,6 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const response = {
       status: result.status,
+      attendance_session: result.attendance_session,
       student: {
         full_name: result.student_name,
         email: result.student_email,
@@ -90,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       original_time: result.original_time,
       scanned_by_name: result.scanned_by_name,
       time_string: result.scanned_at
-        ? new Date(result.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        ? new Date(result.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" })
         : undefined
     };
 

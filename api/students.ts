@@ -1,3 +1,4 @@
+import { attendanceFields, ATTENDANCE_SELECT } from "../src/lib/attendance.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "../server/db.js";
 import { authorizeApi } from "../server/serverless-auth.js";
@@ -7,7 +8,7 @@ const STUDENT_PAGE_SIZE = 1000;
 
 const STUDENT_SELECT = `
   id, full_name, email, college, program, year, section, form_response_id, imported_at, email_status, email_error,
-  attendance(scanned_at, scanned_by),
+  attendance(${ATTENDANCE_SELECT}),
   email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)
 `;
 
@@ -110,6 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           provider_response: emailLog?.provider_response ?? null,
           last_attempt_at: emailLog?.last_attempt_at ?? null,
           attempt_count: emailLog?.attempt_count ?? 0,
+          ...attendanceFields(att, scannerMap),
           scanned_at: att?.scanned_at ?? null,
           scanned_by: scanned_by,
           scanned_by_name

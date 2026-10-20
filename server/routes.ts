@@ -1,3 +1,4 @@
+import { attendanceFields, ATTENDANCE_SELECT, SESSION_CSV_HEADERS, sessionCsvCells } from "../src/lib/attendance.js";
 import { escapeCsvValue } from "../src/lib/csv";
 import { renderTicketPreview } from "./ticket-preview";
 import express from "express";
@@ -406,7 +407,7 @@ router.get("/api/students", authenticateToken, requireAdmin, async (req, res) =>
     for (let from = 0; ; from += pageSize) {
       let query = supabase
         .from("students")
-        .select("*, attendance(scanned_at, scanned_by), email_log(status, error_message, delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)")
+        .select(`*, attendance(${ATTENDANCE_SELECT}), email_log(status, error_message, delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)`)
         .eq("event_id", eventId)
         .order("imported_at", { ascending: false })
         .order("id", { ascending: false })
@@ -457,6 +458,7 @@ router.get("/api/students", authenticateToken, requireAdmin, async (req, res) =>
         provider_response: email?.provider_response || null,
         last_attempt_at: email?.last_attempt_at || null,
         attempt_count: email?.attempt_count || 0,
+        ...attendanceFields(att, scannerMap),
         scanned_at: att?.scanned_at || null,
         scanned_by_name
       };
@@ -1393,6 +1395,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
     if (scanResult.status === "VALID") {
       notifyClients("attendance_logged", {
         student_id: studentId,
+        attendance_session: scanResult.attendance_session,
         scanned_at: scanResult.scanned_at,
         scanned_by_name: scanResult.scanned_by_name
       });
@@ -1407,9 +1410,10 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
           year: scanResult.student_year,
           section: scanResult.student_section
         },
+        attendance_session: scanResult.attendance_session,
         scanned_at: scanResult.scanned_at,
         scanned_by_name: scanResult.scanned_by_name,
-        time_string: new Date(scanResult.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        time_string: new Date(scanResult.scanned_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" })
       });
     } else if (scanResult.status === "ALREADY_USED") {
       return res.json({
@@ -1422,6 +1426,7 @@ router.post("/api/verify-scan", authenticateToken, requireCommitteeOrAdmin, asyn
           year: scanResult.student_year,
           section: scanResult.student_section
         },
+        attendance_session: scanResult.attendance_session,
         scanned_at: scanResult.scanned_at,
         original_time: scanResult.original_time,
         scanned_by_name: scanResult.scanned_by_name
@@ -1445,7 +1450,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
   try {
     const { data: students, error } = await supabase
       .from("students")
-      .select("*, attendance(scanned_at, scanned_by), email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)")
+      .select(`*, attendance(${ATTENDANCE_SELECT}), email_log(delivery_status, provider_message_id, provider_response, last_attempt_at, attempt_count)`)
       .eq("event_id", eventId);
 
     if (error) throw error;
@@ -1453,7 +1458,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
     const { data: scanners } = await supabase.from("committee_users").select("id, committee_name");
     const scannerMap = new Map(scanners?.map(s => [s.id, s.committee_name]) || []);
 
-    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station," + SESSION_CSV_HEADERS.join(",") + "\n";
 
     for (const student of (students || [])) {
       const att = Array.isArray(student.attendance) ? student.attendance[0] : student.attendance;
@@ -1480,7 +1485,7 @@ router.get("/api/export-report", authenticateToken, requireAdmin, async (req, re
       const lastAttempt = emailLog?.last_attempt_at ? new Date(emailLog.last_attempt_at).toISOString() : "";
       const escapedScanner = escapeCsvValue(scannerName);
 
-      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${emailLog?.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}",${sessionCsvCells(attendanceFields(att, scannerMap)).map(value => `"${escapeCsvValue(value)}"`).join(",")}\n`;
     }
 
     res.setHeader("Content-Type", "text/csv");

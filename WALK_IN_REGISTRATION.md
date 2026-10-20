@@ -2,6 +2,8 @@
 
 Students enter through **Register as a Walk-In** on the homepage, choose an open event, read the privacy notice and explicitly agree, enter Name, Email, College, Program, Year and Section, review their details, then receive a downloadable admission QR. Registration saves a participant; committee scanning records attendance. There is no student account or automatic email.
 
+The same QR supports one AM and one PM check-in per event. Before 12:00 noon Philippine time counts as AM; from noon counts as PM. The database chooses the session using its clock. Repeats within a session remain duplicates. Existing timestamps are classified by their recorded Philippine time; the system cannot reconstruct PM attendance that was never recorded. The AM/PM extension is migration `20261020054714_attendance_am_pm_sessions.sql`, applied after the walk-in migration. Admins can inspect both sessions and export their times and stations.
+
 ## Privacy agreement before the form
 
 Direct event links and event-card navigation show the privacy notice before any participant inputs are rendered. The checkbox starts unchecked; **I agree and continue** stays disabled until it is checked. **Decline and return to events** clears that event's local draft/receipt. Consent is scoped to the event, browser tab, and notice version; an old draft without current consent must show the notice again. Existing issued tickets remain recoverable without a new registration or forced re-consent. The form offers **View privacy notice** to read it again.

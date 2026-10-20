@@ -38,6 +38,8 @@ Camera access on a phone over a LAN IP requires trusted HTTPS. A page opening ov
 
 ## Ticket design preview
 
+Attendance uses the same issued QR once for **AM** and once for **PM**, with a **12:00 noon Asia/Manila** cutoff determined by the database clock. Existing scan timestamps are preserved and classified into the appropriate session. The admin ledger, session totals, filters and CSV export show AM and PM separately. Apply `supabase/migrations/20261020054714_attendance_am_pm_sessions.sql` after the walk-in migration when provisioning an existing registration database. See [the release record](RELEASE_AM_PM_2026-10-20.md).
+
 Run `npm.cmd run preview:ticket`, then open [previews/cyber-ticket.html](previews/cyber-ticket.html) in a browser. It contains sample details and a dummy QR with inert text, not an admission ticket or a web link. New tickets use the navy/cyan cybersecurity design in `server/ticket-template.ts`. Administrator previews render the current design using the saved entry QR without sending an email; previously delivered emails are unchanged.
 
 `npm run clean` removes only generated `dist/` and `build/` artifacts. The supplied SQL export is a transfer snapshot; the current migration directory alone is not yet a demonstrated fresh-database provisioning path.

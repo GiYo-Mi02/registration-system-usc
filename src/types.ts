@@ -15,6 +15,12 @@ export interface Student {
   provider_response?: string | null;
   last_attempt_at?: string | null;
   attempt_count?: number;
+  am_scanned_at?: string | null;
+  am_scanned_by?: string | null;
+  am_scanned_by_name?: string | null;
+  pm_scanned_at?: string | null;
+  pm_scanned_by?: string | null;
+  pm_scanned_by_name?: string | null;
   scanned_at?: string | null;
   scanned_by?: string | null;
   scanned_by_name?: string | null;

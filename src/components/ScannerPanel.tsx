@@ -70,6 +70,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
       section?: string | null;
     };
     message?: string;
+    attendance_session?: "AM" | "PM";
     original_time?: string;
     scanned_at?: string;
     scanned_by_name?: string;
@@ -549,7 +550,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
 
               <div className="mt-4 text-center">
                 <p className="text-xs text-brand-text/50">
-                  Align student's printed or digital email QR code within the target bracket to instantly record attendance.
+                  Align student's printed or digital email QR code within the target bracket to record attendance once per session using the same QR. Before 12:00 noon is AM; from noon is PM (Philippine time).
                 </p>
               </div>
 
@@ -574,7 +575,7 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                   <div className="flex-1 space-y-1.5 min-w-0">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h4 className="font-serif text-sm md:text-base font-bold uppercase tracking-wider">
-                        {scanState === "valid" ? "Access Granted" : scanState === "duplicate" ? "Duplicate Entry" : "Access Denied"}
+                        {scanState === "valid" ? `${scanResult?.attendance_session || ""} Check-in Recorded` : scanState === "duplicate" ? `${scanResult?.attendance_session || ""} Duplicate Entry` : "Access Denied"}
                       </h4>
                       <span className="text-[10px] md:text-xs font-mono font-bold tracking-wide opacity-85 bg-black/30 border border-white/10 px-2 py-0.5 rounded">
                         AUTO-CLEAR
@@ -676,8 +677,8 @@ export default function ScannerPanel({ auth, selectedEvent, onBackToEvents, onLo
                 <li className="flex items-start gap-2.5">
                   <span className="w-4 h-4 rounded bg-brand-accent/10 text-brand-accent flex items-center justify-center shrink-0 mt-0.5 text-[9px] font-bold">2</span>
                   <div>
-                    <span className="text-white block font-bold uppercase tracking-wider">Single-Use QR Policy</span>
-                    <p className="text-brand-text/50 mt-0.5 leading-relaxed">Once scanned, the QR code is automatically locked in our ledger and is completely void for any subsequent entries.</p>
+                    <span className="text-white block font-bold uppercase tracking-wider">One Check-in Per Session</span>
+                    <p className="text-brand-text/50 mt-0.5 leading-relaxed">Use the same QR for AM and PM. Before 12:00 noon counts as AM; from noon counts as PM (Philippine time). Repeat scans within the same session show Duplicate Entry.</p>
                   </div>
                 </li>
                 <li className="flex items-start gap-2.5">

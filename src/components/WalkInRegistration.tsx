@@ -204,9 +204,9 @@ function EventRegistration({ eventId }: { eventId: string }) {
     <div className="registration-ticket">
       <CheckCircle2 className="registration-success-icon" aria-hidden="true" />
       <p className="registration-eyebrow">Registration complete</p><h1 ref={headingRef} tabIndex={-1}>You're on the list.</h1>
-      <p role="status">Registration saved. Present this QR at the venue to check in.</p>
-      <div className="registration-qr"><img src={ticket.qr_data_url} alt={`Admission QR for ${ticket.full_name}`} /><h2>{ticket.full_name}</h2><p>ADMISSION QR · ONE CHECK-IN</p></div>
-      {ticket.scanned_at && <p className="registration-info"><CheckCircle2 aria-hidden="true" />This ticket has already been checked in. Another scan will show Duplicate Entry.</p>}
+      <p role="status">Registration saved. Present the same QR for AM and PM check-in.</p>
+      <div className="registration-qr"><img src={ticket.qr_data_url} alt={`Admission QR for ${ticket.full_name}`} /><h2>{ticket.full_name}</h2><p>ADMISSION QR · AM + PM</p></div>
+      {ticket.scanned_at && <p className="registration-info"><CheckCircle2 aria-hidden="true" />This QR has a recorded check-in. Keep it for the other session. Repeat scans within the same session show Duplicate Entry.</p>}
       <a href={ticket.qr_data_url} download={`admission-${ticket.event.id}.png`} className={`${buttonClass} registration-button-full`}><Download aria-hidden="true" />Download QR</a>
       <p className="registration-caption">Save your QR before leaving this page. Bring your student ID for committee checking. No email will be sent.</p>
       {error && <p role="alert" className="registration-error">{error}</p>}

@@ -1,3 +1,4 @@
+import { formatAttendanceTime, matchesAttendance, SESSION_CSV_HEADERS, sessionCsvCells } from "../lib/attendance";
 import { escapeCsvValue } from "../lib/csv";
 import { isEmailFailure, isEmailNotRequested } from "../lib/walk-in";
 import React, { useState, useEffect } from "react";
@@ -148,13 +149,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     filtered = filtered.filter(s => s.college === collegeFilter);
   }
 
-  if (attendanceFilter) {
-    if (attendanceFilter === "attended") {
-      filtered = filtered.filter(s => s.scanned_at !== null && s.scanned_at !== undefined);
-    } else if (attendanceFilter === "not_attended") {
-      filtered = filtered.filter(s => s.scanned_at === null || s.scanned_at === undefined);
-    }
-  }
+  filtered = filtered.filter(student => matchesAttendance(student, attendanceFilter));
 
   if (emailFilter) {
     if (emailFilter === "failed") {
@@ -657,7 +652,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
   // 8. Client-side CSV generator for export
   const handleExportCSV = () => {
-    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station\n";
+    let csv = "Name,Email,College,Program,Year,Section,Email Delivery Status,Provider Message ID,Provider Response,Delivery Attempts,Last Delivery Attempt,Attended (Yes/No),Time Attended,Scanned By Station," + SESSION_CSV_HEADERS.join(",") + "\n";
     for (const student of students) {
       const isAttended = student.scanned_at ? "Yes" : "No";
       const scannedTime = student.scanned_at ? new Date(student.scanned_at).toISOString() : "--:--";
@@ -675,7 +670,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
       const lastAttempt = student.last_attempt_at ? new Date(student.last_attempt_at).toISOString() : "";
       const escapedScanner = escapeCsvValue(scannerName);
       
-      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}"\n`;
+      csv += `"${escapedName}","${escapedEmail}","${escapedCollege}","${escapedProgram}","${escapedYear}","${escapedSection}","${deliveryStatus}","${escapedMessageId}","${escapedProviderResponse}","${student.attempt_count || 0}","${lastAttempt}","${isAttended}","${scannedTime}","${escapedScanner}",${sessionCsvCells(student).map(value => `"${escapeCsvValue(value)}"`).join(",")}\n`;
     }
     
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -810,7 +805,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
 
         <div className="bg-brand-primary/80 p-5 rounded-2xl border border-brand-accent/10 shadow-lg space-y-3">
           <div className="flex justify-between items-center text-emerald-400">
-            <span className="text-[10px] tracking-widest font-mono uppercase font-bold text-brand-text/60">Attendance Rate</span>
+            <span className="text-[10px] tracking-widest font-mono uppercase font-bold text-brand-text/60">Any Session Attendance</span>
             <Check className="w-5 h-5 opacity-75" />
           </div>
           <div>
@@ -848,6 +843,13 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         </div>
 
       </div>
+
+      <section aria-label="Session attendance totals" className="bg-brand-primary/80 rounded-2xl border border-brand-accent/15 p-5">
+        <div className="flex flex-wrap justify-between gap-2 mb-4"><h3 className="font-serif font-bold text-brand-text">AM / PM Attendance</h3><p className="text-xs text-brand-text/60">Before noon: AM · From noon: PM · Philippine time</p></div>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          {[["AM attended", students.filter(s => s.am_scanned_at).length], ["PM attended", students.filter(s => s.pm_scanned_at).length], ["Both sessions", students.filter(s => s.am_scanned_at && s.pm_scanned_at).length]].map(([label, count]) => <div key={label}><p className="text-xs text-brand-text/60">{label}</p><p className="text-2xl font-bold text-brand-accent">{count}</p></div>)}
+        </div>
+      </section>
 
       {/* Real-time Email Dispatch Progress Tracker */}
       {students.length > 0 && (
@@ -1385,6 +1387,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
           {/* Attendance Filter */}
           <div>
             <select
+              aria-label="Filter attendance"
               id="filter-attendance-select"
               value={attendanceFilter}
               onChange={(e) => setAttendanceFilter(e.target.value)}
@@ -1393,6 +1396,11 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
               <option value="">All Attendance States</option>
               <option value="attended">Attended Check-In 🟩</option>
               <option value="not_attended">Not Attended ⬜</option>
+              <option value="am">AM attended</option>
+              <option value="pm">PM attended</option>
+              <option value="both">Both sessions attended</option>
+              <option value="am_only">AM only</option>
+              <option value="pm_only">PM only</option>
             </select>
           </div>
 
@@ -1425,8 +1433,8 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                 <th className="px-6 py-4 font-semibold">Year</th>
                 <th className="px-6 py-4 font-semibold">Section</th>
                 <th className="px-6 py-4 font-semibold text-center">Email Status</th>
-                <th className="px-6 py-4 font-semibold text-center">Attendance</th>
-                <th className="px-6 py-4 font-semibold text-center">Time</th>
+                <th className="px-6 py-4 font-semibold text-center">AM Session</th>
+                <th className="px-6 py-4 font-semibold text-center">PM Session</th>
                 <th className="px-6 py-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
@@ -1488,31 +1496,17 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-3.5 text-center">
-                      {s.scanned_at ? (
-                        <span className="inline-flex items-center gap-1 bg-brand-accent/20 text-brand-accent px-2.5 py-1 rounded-full border border-brand-accent/30 text-[10px] font-bold tracking-wide">
-                          <Check className="w-2.5 h-2.5" /> Attended
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 bg-brand-text/5 text-brand-text/40 px-2.5 py-1 rounded-full border border-brand-text/10 text-[10px] font-semibold">
-                          Not Attended
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3.5 text-center font-mono">
-                      {s.scanned_at ? (
-                        <div className="flex flex-col items-center">
-                          <span className="text-brand-text font-bold text-xs">
-                            {new Date(s.scanned_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          <span className="text-[9px] text-brand-accent/80 mt-0.5 max-w-[120px] truncate block opacity-75">
-                            [{s.scanned_by_name || "Self Scan"}]
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-brand-text/30">--:--</span>
-                      )}
-                    </td>
+                    {(["am", "pm"] as const).map(session => {
+                      const time = s[`${session}_scanned_at`];
+                      const station = s[`${session}_scanned_by_name`];
+                      return <td key={session} className="px-6 py-3.5 text-center whitespace-nowrap">
+                        {time ? <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center gap-1 bg-brand-accent/20 text-brand-accent px-2.5 py-1 rounded-full border border-brand-accent/30 text-[10px] font-bold"><Check className="w-2.5 h-2.5" /> Attended</span>
+                          <time dateTime={time} className="font-mono text-brand-text">{formatAttendanceTime(time)}</time>
+                          <span className="text-[9px] text-brand-text/60">{station || "Unknown Station"}</span>
+                        </div> : <span className="text-brand-text/40 text-[10px]">Not attended</span>}
+                      </td>;
+                    })}
                     <td className="px-6 py-3.5 text-right space-x-2 whitespace-nowrap">
                       
                       {/* View Email ticket */}

@@ -19,6 +19,7 @@ test("isolated PostgreSQL: migration, transaction rollback, duplicate prevention
     // PostgreSQL's built-in gen_random_uuid supplies the only fixture use of pgcrypto.
     await db.exec(baseline);
     await db.exec(await fs.readFile(migrationUrl, "utf8"));
+    await db.exec(await fs.readFile(new URL("../supabase/migrations/20261020054714_attendance_am_pm_sessions.sql", import.meta.url), "utf8"));
     await db.query("insert into events(id,name,event_date,description,venue,banner_url) values($1,'Walk-In Test','Today','Test','Hall',''),($2,'Other Event','Today','Test','Hall','')", [eventId, otherEventId]);
     await db.exec("insert into committee_users(id,username,committee_name,password_hash,active) values('scanner-test','scanner','Test Gate','not-a-real-password',true)");
 
@@ -74,7 +75,7 @@ test("isolated PostgreSQL: migration, transaction rollback, duplicate prevention
         await db.exec(`drop trigger fail_test on ${table}`);
       }
     });
-    await t.test("committee check-in accepts once and preserves original attendance", async () => {
+    await t.test("committee check-in accepts once per session and preserves original attendance", async () => {
       const token = (await db.query<{ student_id: string; token: string }>("select student_id,token from qr_tokens where student_id=(select id from students where walk_in_request_hash=$1)", [hash])).rows[0];
       const scan = () => db.query<{ status: string; scanned_at: string }>("select * from verify_attendance_scan($1::uuid,$2,'scanner-test')", [token.student_id, token.token]);
       const first = (await scan()).rows[0]; const repeat = (await scan()).rows[0];

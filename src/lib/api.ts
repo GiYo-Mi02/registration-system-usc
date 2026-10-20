@@ -272,6 +272,7 @@ export async function verifyScan(
   sessionToken: string
 ): Promise<{
   status: "VALID" | "ALREADY_USED" | "FAKE";
+  attendance_session?: "AM" | "PM";
   student?: { full_name: string; email: string; college: string; program?: string | null; year?: string | null; section?: string | null };
   scanned_at?: string;
   original_time?: string;
