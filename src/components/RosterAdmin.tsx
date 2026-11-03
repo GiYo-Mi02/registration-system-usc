@@ -37,8 +37,8 @@ export default function RosterAdmin({ token, event }: { token: string; event: Ev
     finally { lock.current = false; if (active.current) setBusy(false); }
   };
   const loadSource = () => perform(async () => {
-    const source = await rosterRequest<RosterSource>("source", undefined, undefined, token);
-    if (event.name.trim().toUpperCase() !== source.eventName) throw new Error(`Select the ${source.eventName} event before loading this supplied list.`);
+    const source = await rosterRequest<RosterSource>("source", event.id, undefined, token);
+    if (event.name.trim().toUpperCase() !== source.eventName.trim().toUpperCase()) throw new Error(`Select the ${source.eventName} event before loading this supplied list.`);
     setPreview(source.participants);
   });
   const importPreview = () => perform(async () => {

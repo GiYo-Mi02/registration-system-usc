@@ -76,7 +76,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogout, students, onRefreshStudents, onRosterModeChange }: AdminPanelProps) {
-  const [rosterMode, setRosterMode] = useState(() => selectedEvent.name.trim().toUpperCase() === "IT SKILLS OLYMPICS");
+  const [rosterMode, setRosterMode] = useState(() => selectedEvent.name.trim().toUpperCase().startsWith("IT SKILLS OLYMPICS"));
   useEffect(() => { onRosterModeChange(rosterMode); return () => onRosterModeChange(false); }, [rosterMode, onRosterModeChange]);
   // Filtering and Searching
   const [search, setSearch] = useState("");

@@ -130,7 +130,7 @@ function fakeDatabase(options: { ambiguous?: boolean; allowed?: boolean; closed?
         maybeSingle: async () => ({ error: null, data: table === "events" ? { id: event, name: "IT SKILLS OLYMPICS", roster_check_in_open: !options.closed } : table === "committee_sessions" && options.admin ? { committee_user_id: "admin-id", last_heartbeat: new Date().toISOString() } : null }),
         then(resolve: (value: unknown) => unknown) {
           let data: unknown[] = [];
-          if (options.databaseSource && table === "events") data = [{ id: event }];
+          if (options.databaseSource && table === "events" && filters.get("id") === event) data = [{ id: event, name: "IT SKILLS OLYMPICS: QUIZ BEE ATTENDANCE" }];
           if (options.databaseSource && table === "participant_roster") data = rows;
           if (table === "participant_roster" && filters.has("school_id_key")) data = options.ambiguous ? [{ id: participantId, ...rows[0] }, { id: other, ...rows[1] }] : [{ id: participantId, ...rows[0] }];
           return Promise.resolve({ data, error: options.error ? { message: "private database details" } : null }).then(resolve);
@@ -167,7 +167,7 @@ test("public lookup reveals one matched record and short-lived proof, without re
 test("authenticated admin source review uses the imported database roster without a private source file", async () => {
   const result = await endpoint("source", "GET", undefined, { admin: true, databaseSource: true });
   assert.equal(result.status, 200);
-  assert.equal(result.body.eventName, "IT SKILLS OLYMPICS");
+  assert.equal(result.body.eventName, "IT SKILLS OLYMPICS: QUIZ BEE ATTENDANCE");
   assert.deepEqual(result.body.participants, rows);
   assert.ok(result.calls.some(call => call.name === "from" && call.args === "participant_roster"));
 });

@@ -48,13 +48,17 @@ export async function rosterCheckIn(req: PublicRequest, res: PublicResponse, db:
     }
     if (action === "source") {
       const eventName = "IT SKILLS OLYMPICS";
-      const { data: events, error: eventError } = await db.from("events").select("id").ilike("name", eventName).limit(2);
+      const selectedId = req.query.eventId;
+      if (selectedId !== undefined && !isEventId(selectedId)) return fail(res, 400, "Choose a valid event.");
+      let eventQuery = db.from("events").select("id,name");
+      eventQuery = selectedId ? eventQuery.eq("id", selectedId) : eventQuery.ilike("name", eventName);
+      const { data: events, error: eventError } = await eventQuery.limit(2);
       if (eventError) return unavailable(res);
       if (events && events.length > 1) return fail(res, 409, "More than one IT SKILLS OLYMPICS event exists. Please use the event's roster setup.");
       if (events?.[0]) {
         const { data: participants, error } = await db.from("participant_roster").select(participantColumns).eq("event_id", events[0].id).order("school").order("full_name").range(0, 999);
         if (error) return unavailable(res);
-        if (participants?.length) return res.status(200).json({ success: true, eventName, participants: validateRoster(participants) });
+        if (participants?.length) return res.status(200).json({ success: true, eventName: events[0].name, participants: validateRoster(participants) });
       }
       // Optional local bootstrap file is excluded from Git and deployments.
       // Published installations read the protected imported roster above.
