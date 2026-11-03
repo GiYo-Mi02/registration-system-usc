@@ -2,6 +2,7 @@ import { formatAttendanceTime, matchesAttendance, SESSION_CSV_HEADERS, sessionCs
 import { escapeCsvValue } from "../lib/csv";
 import { isEmailFailure, isEmailNotRequested } from "../lib/walk-in";
 import React, { useState, useEffect } from "react";
+import RosterAdmin from "./RosterAdmin";
 import { 
   Users, 
   UserPlus, 
@@ -65,6 +66,7 @@ function parseCSVLine(line: string): string[] {
 }
 
 interface AdminPanelProps {
+  onRosterModeChange: (enabled: boolean) => void;
   auth: AuthState;
   selectedEvent: Event;
   onBackToEvents: () => void;
@@ -73,7 +75,9 @@ interface AdminPanelProps {
   onRefreshStudents: (tokenOverride?: string, eventIdOverride?: string) => Promise<boolean>;
 }
 
-export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogout, students, onRefreshStudents }: AdminPanelProps) {
+export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogout, students, onRefreshStudents, onRosterModeChange }: AdminPanelProps) {
+  const [rosterMode, setRosterMode] = useState(() => selectedEvent.name.trim().toUpperCase() === "IT SKILLS OLYMPICS");
+  useEffect(() => { onRosterModeChange(rosterMode); return () => onRosterModeChange(false); }, [rosterMode, onRosterModeChange]);
   // Filtering and Searching
   const [search, setSearch] = useState("");
   const [collegeFilter, setCollegeFilter] = useState("");
@@ -685,6 +689,11 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
     URL.revokeObjectURL(url);
   };
 
+  if (rosterMode && auth.token) return <div className="w-full max-w-7xl mx-auto px-4 py-8 space-y-8">
+    <nav className="flex flex-wrap gap-4" aria-label="Admin navigation"><button onClick={onBackToEvents}>← Back to events</button><button onClick={() => setRosterMode(false)}>QR registration ledger</button><button onClick={onLogout}>Lock console</button></nav>
+    <RosterAdmin key={selectedEvent.id} token={auth.token} event={selectedEvent} />
+  </div>;
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-8 space-y-8">
       
@@ -722,6 +731,7 @@ export default function AdminPanel({ auth, selectedEvent, onBackToEvents, onLogo
         </div>
       </div>
 
+      <button className="px-5 py-3 rounded-xl border border-brand-accent/40 text-brand-accent" onClick={() => setRosterMode(true)}>Participant time-ins / School-ID check-in</button>
       {/* Email Queue Dispatch Panel */}
       {stats.total > 0 && (
         <div id="email-queue-panel" className="bg-brand-primary p-6 rounded-3xl border border-brand-accent/20 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-xl animate-fade-in">

@@ -3,6 +3,7 @@
   "buildCommand": "npm run build:client",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/roster-check-in", "destination": "/api/registration?operation=roster-check-in" },
     { "source": "/api/public-events", "destination": "/api/registration?operation=public-events" },
     { "source": "/api/walk-in-registration", "destination": "/api/registration?operation=walk-in-registration" },
     { "source": "/api/email-preview", "destination": "/api/registration?operation=email-preview" },

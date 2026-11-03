@@ -4,6 +4,8 @@ import { getPublicEvents, registerWalkIn, restoreWalkIn } from "../lib/walk-in-a
 import { isEventId, validateWalkInDetails, walkInFields, type PublicEvent, type WalkInDetails, type WalkInTicket } from "../lib/walk-in";
 import { hasRegistrationPrivacyConsent, REGISTRATION_PRIVACY_VERSION, type RegistrationPrivacyConsent } from "../lib/registration-privacy";
 import RegistrationPrivacyNotice from "./RegistrationPrivacyNotice";
+import ParticipantCheckIn from "./ParticipantCheckIn";
+import { rosterEvents } from "../lib/roster-api";
 import "./WalkInRegistration.css";
 
 const buttonClass = "registration-button";
@@ -74,32 +76,39 @@ function RegistrationNotice({ title, children, action }: { title: string; childr
 }
 
 function OpenEvents() {
-  const [events, setEvents] = useState<PublicEvent[]>([]);
+  const [events, setEvents] = useState<Array<PublicEvent & { walkIn?: boolean; checkIn?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     setLoading(true); setError("");
-    getPublicEvents().then(data => { if (active) setEvents(data); })
+    Promise.allSettled([getPublicEvents(), rosterEvents()]).then(([walkIns, roster]) => {
+      if (walkIns.status === "rejected" && roster.status === "rejected") throw walkIns.reason;
+      const available = new Map<string, PublicEvent & { walkIn?: boolean; checkIn?: boolean }>();
+      if (walkIns.status === "fulfilled") for (const event of walkIns.value) available.set(event.id, { ...event, walkIn: true });
+      if (roster.status === "fulfilled") for (const event of roster.value.events) available.set(event.id, { ...available.get(event.id), ...event, checkIn: true });
+      if (active) setEvents([...available.values()]);
+    })
       .catch(error => { if (active) setError(messageFor(error)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [attempt]);
   return <>
-    <header className="registration-intro"><p className="registration-eyebrow">Walk-in registration</p><h1>Your next experience<br />starts here.</h1><p>Choose an event, enter your details, and get your admission QR.<br className="registration-desktop-break" /> No account needed.</p>
+    <header className="registration-intro"><p className="registration-eyebrow">Registration &amp; participant check-in</p><h1>Your next experience<br />starts here.</h1><p>Choose your event to register, or check in with your school ID if you're on the participant list.<br className="registration-desktop-break" /> No account needed.</p>
       <div className="registration-intro-steps"><span><UserRound aria-hidden="true" />Enter your details</span><ArrowRight aria-hidden="true" /><span><QrCode aria-hidden="true" />Save your QR</span></div>
     </header>
     <section aria-labelledby="registration-events-title">
       <div className="registration-section-heading"><h2 id="registration-events-title">Available events</h2>{!loading && !error && <span>{events.length} {events.length === 1 ? "event" : "events"} open</span>}</div>
       {loading ? <div role="status" className="registration-loading"><Loader2 className="animate-spin" aria-hidden="true" />Loading events…</div>
         : error ? <RegistrationNotice title="We couldn't load the events" action={<button className={buttonClass} onClick={() => setAttempt(value => value + 1)}>Try again <ArrowRight aria-hidden="true" /></button>}><p role="alert">{error}</p></RegistrationNotice>
-        : events.length === 0 ? <RegistrationNotice title="Check back soon"><p>No events are accepting walk-ins right now.</p><p>Please check with the registration committee for availability.</p></RegistrationNotice>
+        : events.length === 0 ? <RegistrationNotice title="Check back soon"><p>No events are accepting registration or participant check-in right now.</p><p>Please check with the registration committee for availability.</p></RegistrationNotice>
         : <div className={`registration-event-grid${events.length === 1 ? " registration-event-grid-single" : ""}`}>{events.map(event => <article key={event.id} className="registration-event-card">
           <EventArtwork event={event} />
-          <div className="registration-event-card-body"><span className="registration-open-badge"><span />Open for walk-ins</span><EventDetails event={event} />
+          <div className="registration-event-card-body"><span className="registration-open-badge"><span />{event.checkIn ? "Participant check-in open" : "Open for walk-ins"}</span><EventDetails event={event} />
             {event.description && <p className="registration-event-description">{event.description}</p>}
-            <a className={buttonClass} href={`/register/${event.id}`} aria-label={`Register for this event: ${event.name}`}>Register for this event <ArrowRight aria-hidden="true" /></a>
+            {event.checkIn && <a className={`${buttonClass} registration-button-full`} href={`/register/${event.id}?checkin=1`} aria-label={`Check in for ${event.name}`}>Check in with school ID <ArrowRight aria-hidden="true" /></a>}
+            {event.walkIn && <a className={`${buttonClass}${event.checkIn ? " registration-button-secondary registration-event-secondary" : ""}`} href={`/register/${event.id}`} aria-label={`Register for this event: ${event.name}`}>Register as a walk-in <ArrowRight aria-hidden="true" /></a>}
           </div>
         </article>)}</div>}
     </section>
@@ -245,9 +254,9 @@ export default function WalkInRegistration({ eventId }: { eventId?: string }) {
   return <div className="participant-registration">
     <header className="registration-masthead"><div className="registration-container"><div className="registration-brand"><span className="registration-brand-icon"><Ticket aria-hidden="true" /></span><div><p>University of Makati</p><span>Event registration</span></div></div><span className="registration-participant-label">Participant portal</span></div></header>
     <main className="registration-container registration-main">
-      {eventId && <a href="/register" className="registration-back"><ArrowLeft aria-hidden="true" />All walk-in events</a>}
-      {!eventId ? <OpenEvents /> : isEventId(eventId) ? <EventRegistration key={eventId} eventId={eventId} /> : <RegistrationNotice title="This link isn't valid"><p role="alert">This registration link is invalid. Choose an event from the walk-in events page.</p><a href="/register" className={buttonClass}>View available events <ArrowRight aria-hidden="true" /></a></RegistrationNotice>}
+      {eventId && <a href="/register" className="registration-back"><ArrowLeft aria-hidden="true" />All events</a>}
+      {!eventId ? <OpenEvents /> : isEventId(eventId) ? new URLSearchParams(window.location.search).get("checkin") === "1" ? <ParticipantCheckIn key={eventId} eventId={eventId} /> : <EventRegistration key={eventId} eventId={eventId} /> : <RegistrationNotice title="This link isn't valid"><p role="alert">This registration link is invalid. Choose an event from the walk-in events page.</p><a href="/register" className={buttonClass}>View available events <ArrowRight aria-hidden="true" /></a></RegistrationNotice>}
     </main>
-    <footer className="registration-footer"><div className="registration-container"><p>University of Makati</p><span>Walk-in event registration</span></div></footer>
+    <footer className="registration-footer"><div className="registration-container"><p>University of Makati</p><span>Event registration &amp; check-in</span></div></footer>
   </div>;
 }

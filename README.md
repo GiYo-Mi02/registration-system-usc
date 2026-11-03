@@ -4,7 +4,9 @@ React/Vite registration and QR check-in frontend, Express backend for local/pers
 
 See [AUDIT.md](AUDIT.md) for the completed repairs, verification evidence, production blockers, and full hosting runbook.
 
-Student self-service walk-ins are available through **Register as a Walk-In** on the homepage. Administrators open registration per event; students receive a downloadable QR for the existing committee scanner. Before using the feature, follow [walk-in database setup and verification](WALK_IN_REGISTRATION.md). No email is sent automatically.
+Student self-service walk-ins are available through **Register / Participant Check-In** on the homepage. Administrators open registration per event; students receive a downloadable QR for the existing committee scanner. Before using the feature, follow [walk-in database setup and verification](WALK_IN_REGISTRATION.md). No email is sent automatically.
+
+Prelisted participants can also check in through `/register` using a school ID or a committee-issued code, review their roster information and download a timestamped attendance receipt. The admin **Participant time-ins** view shows confirmed time-ins only. The supplied IT SKILLS OLYMPICS roster includes 100 participants from 50 schools; see [participant check-in setup](PARTICIPANT_CHECK_IN.md) for migration, import and activation steps.
 
 ## Development
 

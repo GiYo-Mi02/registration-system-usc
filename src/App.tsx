@@ -16,6 +16,7 @@ export default function App() {
 }
 
 function StaffApp() {
+  const [rosterView, setRosterView] = useState(false);
   const registryRequestRef = useRef(0);
   const [auth, setAuth] = useState<AuthState>({
     isAuthenticated: false,
@@ -192,7 +193,7 @@ function StaffApp() {
             <div className="flex flex-wrap items-center gap-6 self-stretch sm:self-auto justify-between sm:justify-end">
               
               {/* Attendance Rate dynamic HUD */}
-              {auth.role === "admin" && <div className="flex items-center gap-4 text-right">
+              {auth.role === "admin" && !rosterView && <div className="flex items-center gap-4 text-right">
                 <div>
                   <p className="text-[10px] uppercase opacity-60 tracking-wider font-mono">Attendance Rate</p>
                   <p className="text-lg font-bold font-serif text-brand-accent">
@@ -210,7 +211,7 @@ function StaffApp() {
 
               <div className="flex items-center gap-3">
                 {/* Authenticated registry-sync indicator */}
-                <div className="flex items-center gap-2 bg-brand-primary-dark/80 px-3 py-1.5 rounded-full border border-brand-text/10 font-mono text-[10px] shadow-inner font-bold">
+                {!rosterView && <div className="flex items-center gap-2 bg-brand-primary-dark/80 px-3 py-1.5 rounded-full border border-brand-text/10 font-mono text-[10px] shadow-inner font-bold">
                   <span className={`w-2.5 h-2.5 rounded-full ${
                     auth.role === "committee" ? "bg-brand-accent" : sseStatus === "connected"
                       ? "bg-emerald-500 animate-pulse" 
@@ -221,7 +222,7 @@ function StaffApp() {
                   <span className="text-brand-text/80 uppercase tracking-wider">
                     {auth.role === "committee" ? "Scanner Session" : sseStatus === "connected" ? "Live Sync" : sseStatus === "connecting" ? "Syncing..." : "Offline"}
                   </span>
-                </div>
+                </div>}
 
                 {/* Role indication if logged in */}
                 {auth.isAuthenticated && (
@@ -256,6 +257,7 @@ function StaffApp() {
             onLogout={handleLogout} 
             students={students} 
             onRefreshStudents={loadStudents} 
+            onRosterModeChange={setRosterView}
           />
         ) : auth.role === "committee" ? (
           <ScannerPanel 

@@ -13,3 +13,4 @@ supabase
 previews
 *.csv
 *.log
+assets/participant-roster.json

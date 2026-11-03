@@ -2,6 +2,7 @@ import { attendanceFields, ATTENDANCE_SELECT, SESSION_CSV_HEADERS, sessionCsvCel
 import { escapeCsvValue } from "../src/lib/csv";
 import { renderTicketPreview } from "./ticket-preview";
 import express from "express";
+import { rosterCheckIn } from "./roster-check-in";
 import { publicEvents, walkInRegistration, setWalkInAvailability } from "./walk-in";
 import { excludeUnrequestedEmails } from "./email-selection";
 import crypto from "crypto";
@@ -28,6 +29,7 @@ import {
 } from "./helpers";
 
 const router = express.Router();
+router.all("/api/roster-check-in", (req, res) => rosterCheckIn(req, res, supabase, req.ip || req.socket.remoteAddress || "unknown"));
 
 router.get("/api/public-events", (req, res) => publicEvents(req, res, supabase));
 router.all("/api/walk-in-registration", (req, res) => walkInRegistration(req, res, supabase, req.ip || req.socket.remoteAddress || "unknown"));

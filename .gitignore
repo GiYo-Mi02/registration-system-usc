@@ -10,3 +10,5 @@ db.json
 scratch/
 .npm-cache/
 .vercel/
+# Participant identities are private operational data, not public source code.
+assets/participant-roster.json

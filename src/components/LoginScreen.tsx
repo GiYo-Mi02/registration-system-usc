@@ -60,8 +60,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
         <section className="mb-8 rounded-xl border border-brand-accent/30 bg-brand-primary-dark p-5">
           <p className="mb-2 text-sm font-semibold text-brand-text">Attending as a participant?</p>
-          <p className="mb-4 text-xs text-brand-text/70">Register for an event and get your admission QR. No account needed.</p>
-          <a href="/register" className="block rounded-xl bg-brand-accent px-4 py-3 text-center text-sm font-bold text-brand-primary-dark">Register as a Walk-In</a>
+          <p className="mb-4 text-xs text-brand-text/70">Register as a walk-in, or check in with your school ID if you're on the participant list. No account needed.</p>
+          <a href="/register" className="block rounded-xl bg-brand-accent px-4 py-3 text-center text-sm font-bold text-brand-primary-dark">Register / Participant Check-In</a>
         </section>
         <h2 className="mb-3 text-sm font-semibold text-brand-text">Event Staff Login</h2>
         {/* Tab Role Switcher */}
